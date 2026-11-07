@@ -18,14 +18,14 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 |---|---|---|---|---|
 | 0 | Setup | 7 | 0.5 h | ☑ |
 | 1 | Camera pipeline | 7 | 1.5 h | ☐ |
-| 2 | Perception | 8 | 2.5 h | ☐ |
+| 2 | Perception | 9 | 2.5 h | ☐ |
 | 3 | Clean plate | 6 | 1 h | ☐ |
 | 4 | Record & replay | 7 | 1.5 h | ☐ |
 | 5 | Gesture engine | 11 | 4 h | ☐ |
 | 6 | Vanish spell | 10 | 4 h | ☐ |
 | 7 | More spells | 7 | 5 h | ☐ |
 | 8 | Polish & packaging | 10 | 3 h | ☐ |
-| **Total** | | **73** | **~23 h** | |
+| **Total** | | **74** | **~23 h** | |
 
 ---
 
@@ -36,7 +36,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 0.1 | Install Python 3.10+ and confirm `python --version` | — | 5m | [x] |
 | 0.2 | Install OBS Studio with default options (provides the virtual camera driver) | — | 10m | [x] |
 | 0.3 | Create the `code/` root folder, run `git init`, create a venv at `code/.venv` | 0.1 | 5m | [x] |
-| 0.4 | Create `requirements.txt` (opencv-python, mediapipe, pyvirtualcam, sounddevice, numpy, pyyaml, pytest) and install | 0.3 | 5m | [x] |
+| 0.4 | Create `requirements.txt` (opencv-contrib-python, mediapipe, pyvirtualcam, sounddevice, numpy, pyyaml, pytest) and install | 0.3 | 5m | [x] |
 | 0.5 | Scaffold the full folder structure from §4, with empty `__init__.py` files and stub modules | 0.3 | 10m | [x] |
 | 0.6 | Add `config.yaml` from §6 and `.gitignore` (`.venv/`, `recordings/`, `__pycache__/`, `dist/`, `build/`) | 0.5 | 5m | [x] |
 | 0.7 | Add a minimal `README.md` (what it is, setup steps) and make the first commit | 0.6 | 5m | [x] |
@@ -65,12 +65,13 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 
 | ID | Task | Depends on | Est. | Done |
 |---|---|---|---|---|
+| 2.0 | `scripts/download_models.py`: fetch the official hand landmarker and selfie segmenter `.task` model files into `models/` (gitignored); skip files already present | 1.1 | 15m | [ ] |
 | 2.1 | Downscale helper: produce the perception frame at `perception_width`, keeping the aspect ratio | 1.5 | 10m | [ ] |
-| 2.2 | `perception/segmenter.py`: MediaPipe selfie segmentation → float mask at full output resolution | 2.1 | 30m | [ ] |
+| 2.2 | `perception/segmenter.py`: MediaPipe Tasks `ImageSegmenter` (selfie segmentation model from `models/`) → float mask at full output resolution | 2.1 | 30m | [ ] |
 | 2.3 | Mask edge smoothing: slight blur + threshold feathering | 2.2 | 15m | [ ] |
 | 2.4 | Temporal mask smoothing: blend with the previous frame's mask to stop flicker | 2.3 | 15m | [ ] |
-| 2.5 | `perception/hands.py`: MediaPipe Hands → landmarks for up to 2 hands, with handedness, in normalized coords | 2.1 | 30m | [ ] |
-| 2.6 | `render/overlay.py`: debug HUD with green mask tint + hand skeleton, drawn on the preview copy only; toggle with `D` | 2.4, 2.5 | 20m | [ ] |
+| 2.5 | `perception/hands.py`: MediaPipe Tasks `HandLandmarker` (model from `models/`) → landmarks for up to 2 hands, with handedness, in normalized coords | 2.1 | 30m | [ ] |
+| 2.6 | `render/overlay.py`: debug HUD with green mask tint + our own hand skeleton drawing (cv2 lines/circles from landmarks; no `mp.solutions.drawing_utils`), drawn on the preview copy only; toggle with `D` | 2.4, 2.5 | 20m | [ ] |
 | 2.7 | Add per-stage timing (hands, segmentation) to the FPS log | 1.4, 2.5 | 10m | [ ] |
 | 2.8 | If FPS < 24: segmentation every 2nd frame, reusing the last mask (config flag) | 2.7 | 15m | [ ] |
 

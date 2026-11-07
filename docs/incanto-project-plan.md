@@ -31,8 +31,8 @@ Everything runs locally and uses only free, open-source tools. There are no clou
 |---|---|---|
 | Language | Python 3.10+ | Fast to iterate; best CV ecosystem |
 | Video I/O | OpenCV | Webcam capture, drawing, image ops |
-| Hand tracking | MediaPipe Hands / Gesture Recognizer | 21 hand landmarks per hand, real-time on CPU |
-| Person mask | MediaPipe Selfie Segmentation | Per-pixel "this is you" mask |
+| Hand tracking | MediaPipe Tasks `HandLandmarker` | 21 hand landmarks per hand, real-time on CPU (`mp.solutions` no longer exists in MediaPipe 1.x) |
+| Person mask | MediaPipe Tasks `ImageSegmenter` (selfie segmentation model) | Per-pixel "this is you" mask |
 | Audio | sounddevice + numpy | Mic stream for snap/clap sound spikes |
 | Virtual camera | pyvirtualcam | Sends frames to a fake webcam |
 | VCam driver | OBS Studio (installed, never opened) | Provides the Windows virtual camera driver |
@@ -55,8 +55,8 @@ flowchart LR
     end
 
     subgraph Perception
-        HANDS[Hand Tracker<br/>MediaPipe Hands]
-        SEG[Segmenter<br/>MediaPipe Selfie Seg]
+        HANDS[Hand Tracker<br/>MediaPipe HandLandmarker]
+        SEG[Segmenter<br/>MediaPipe ImageSegmenter]
         AUD[Audio Onset Detector<br/>spike + decay check]
     end
 
@@ -164,8 +164,8 @@ code/
 │   │   ├── audio.py                # mic stream thread
 │   │   └── recorder.py             # record + replay clips
 │   ├── perception/
-│   │   ├── hands.py                # MediaPipe hand landmarks
-│   │   ├── segmenter.py            # person mask + edge smoothing
+│   │   ├── hands.py                # HandLandmarker (Tasks API) hand landmarks
+│   │   ├── segmenter.py            # ImageSegmenter person mask + edge smoothing
 │   │   └── audio_onset.py          # snap/clap sound spike detection
 │   ├── gestures/
 │   │   ├── base.py                 # Gesture interface + GestureEvent
@@ -186,10 +186,13 @@ code/
 │   ├── render/
 │   │   ├── compositor.py           # blends frame, mask, plate, effect layers
 │   │   ├── particles.py            # shared particle system
-│   │   └── overlay.py              # debug HUD (preview window only)
+│   │   └── overlay.py              # debug HUD + our own landmark drawing (preview only)
 │   └── utils/
 │       ├── fps.py                  # FPS + per-stage timing
 │       └── logging.py
+├── models/                         # MediaPipe .task model files (gitignored)
+├── scripts/
+│   └── download_models.py          # fetches the model files into models/
 ├── assets/
 │   ├── backdrops/                  # images for backdrop_swap
 │   └── sounds/                     # optional local sound cues
@@ -287,7 +290,7 @@ Each phase ends with a **real-run checkpoint**: something you can see on camera 
 
 ### Phase 0: Setup (≈30 min)
 - Install Python 3.10+, OBS Studio (default options), create a venv.
-- `pip install opencv-python mediapipe pyvirtualcam sounddevice numpy pyyaml`
+- `pip install opencv-contrib-python mediapipe pyvirtualcam sounddevice numpy pyyaml` (MediaPipe depends on `opencv-contrib-python`; do not also install `opencv-python`)
 - Scaffold the folder structure and `config.yaml`.
 
 **Checkpoint:** `python -c "import cv2, mediapipe, pyvirtualcam, sounddevice"` runs clean.
@@ -299,9 +302,10 @@ Each phase ends with a **real-run checkpoint**: something you can see on camera 
 **Checkpoint:** In Google Meet → Settings → Video, select **OBS Virtual Camera** and see yourself. Screenshot of Meet showing the feed, plus the FPS log (target ≥ 24).
 
 ### Phase 2: Perception (2–3 hrs)
-- `perception/segmenter.py`: person mask with edge smoothing.
-- `perception/hands.py`: hand landmarks.
-- `render/overlay.py`: debug HUD (green mask tint + hand skeleton) in the preview window only.
+- `scripts/download_models.py`: fetch the hand landmarker and selfie segmenter model files into `models/`.
+- `perception/segmenter.py`: `ImageSegmenter` person mask with edge smoothing.
+- `perception/hands.py`: `HandLandmarker` hand landmarks.
+- `render/overlay.py`: debug HUD (green mask tint + our own hand skeleton drawing) in the preview window only.
 
 **Checkpoint:** A short recording of the preview showing the mask following you cleanly and both hands tracked, with FPS still ≥ 24. The Meet feed must show **no** debug overlay.
 

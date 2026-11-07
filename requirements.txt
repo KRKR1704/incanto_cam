@@ -1,7 +1,7 @@
-opencv-python
-mediapipe
-pyvirtualcam
-sounddevice
-numpy
-pyyaml
-pytest
+opencv-contrib-python==5.0.0.93
+mediapipe==1.2.2
+pyvirtualcam==0.15.0
+sounddevice==0.5.6
+numpy==2.5.4
+PyYAML==6.0.3
+pytest==9.2.0
