@@ -25,6 +25,30 @@ class VideoConfig:
 
 
 @dataclass(frozen=True)
+class ModelsConfig:
+    hand_landmarker: str = "models/hand_landmarker.task"
+    selfie_segmenter: str = "models/selfie_segmenter_landscape.tflite"
+
+    def resolve(self, name: str) -> Path:
+        """Absolute path of a configured model (relative paths are from the project root)."""
+        path = Path(getattr(self, name))
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+@dataclass(frozen=True)
+class PerceptionConfig:
+    num_hands: int = 2
+    hand_min_detection_confidence: float = 0.5
+    hand_min_presence_confidence: float = 0.5
+    hand_min_tracking_confidence: float = 0.5
+    mask_blur_px: int = 5
+    mask_feather_low: float = 0.35
+    mask_feather_high: float = 0.65
+    mask_temporal_alpha: float = 0.6
+    segment_every_n: int = 1
+
+
+@dataclass(frozen=True)
 class VCamConfig:
     backend: str = "obs"
 
@@ -39,6 +63,8 @@ class TriggersConfig:
 class Config:
     video: VideoConfig = field(default_factory=VideoConfig)
     vcam: VCamConfig = field(default_factory=VCamConfig)
+    models: ModelsConfig = field(default_factory=ModelsConfig)
+    perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     triggers: TriggersConfig = field(default_factory=TriggersConfig)
     mappings: dict[str, str] = field(default_factory=dict)
     gestures: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -86,6 +112,8 @@ def load_config(path: str | Path | None = None) -> Config:
     video = _build(VideoConfig, "video", _section(raw, "video"))
     vcam = _build(VCamConfig, "vcam", _section(raw, "vcam"))
     triggers = _build(TriggersConfig, "triggers", _section(raw, "triggers"))
+    models = _build(ModelsConfig, "models", _section(raw, "models"))
+    perception = _build(PerceptionConfig, "perception", _section(raw, "perception"))
 
     if video.width <= 0 or video.height <= 0:
         raise ConfigError("video.width and video.height must be positive")
@@ -100,6 +128,21 @@ def load_config(path: str | Path | None = None) -> Config:
     if not 0 <= triggers.min_confidence <= 1:
         raise ConfigError("triggers.min_confidence must be between 0 and 1")
 
+    if not 1 <= perception.num_hands <= 2:
+        raise ConfigError("perception.num_hands must be 1 or 2")
+    for key in ("hand_min_detection_confidence", "hand_min_presence_confidence",
+                "hand_min_tracking_confidence", "mask_feather_low", "mask_feather_high"):
+        if not 0 <= getattr(perception, key) <= 1:
+            raise ConfigError(f"perception.{key} must be between 0 and 1")
+    if perception.mask_feather_low >= perception.mask_feather_high:
+        raise ConfigError("perception.mask_feather_low must be less than mask_feather_high")
+    if not 0 < perception.mask_temporal_alpha <= 1:
+        raise ConfigError("perception.mask_temporal_alpha must be in (0, 1]")
+    if perception.mask_blur_px < 0:
+        raise ConfigError("perception.mask_blur_px must be >= 0")
+    if perception.segment_every_n < 1:
+        raise ConfigError("perception.segment_every_n must be >= 1")
+
     mappings = _section(raw, "mappings")
     for gesture, spell in mappings.items():
         if not isinstance(spell, str):
@@ -108,6 +151,8 @@ def load_config(path: str | Path | None = None) -> Config:
     return Config(
         video=video,
         vcam=vcam,
+        models=models,
+        perception=perception,
         triggers=triggers,
         mappings=dict(mappings),
         gestures=_section(raw, "gestures"),
