@@ -1,0 +1,33 @@
+video:
+  width: 1280
+  height: 720
+  fps: 30
+  perception_width: 640        # downscaled for detection
+
+vcam:
+  backend: obs                 # obs | unitycapture
+
+mappings:                      # gesture → spell
+  snap: vanish
+  clap: backdrop_swap
+  thumbs_up: confetti
+
+triggers:
+  global_cooldown_s: 3.0
+  min_confidence: 0.8
+
+gestures:
+  snap:
+    audio_peak_db: -18
+    audio_decay_ms: 60
+    hand_raised_required: true
+  clap:
+    max_wrist_distance: 0.08   # normalized
+    min_approach_speed: 1.5
+
+spells:
+  vanish:
+    particle_size_px: 4
+    duration_s: 1.6
+    drift: [1.0, -0.3]         # right and slightly up
+    stagger: left_to_right

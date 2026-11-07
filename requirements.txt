@@ -1,0 +1,7 @@
+opencv-python
+mediapipe
+pyvirtualcam
+sounddevice
+numpy
+pyyaml
+pytest
