@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import platform
 import time
 
 import cv2
@@ -13,6 +14,7 @@ from incanto.io.camera import Camera, CameraError
 from incanto.io.vcam import VCamError, VirtualCamera
 from incanto.utils.fps import FpsCounter, StageTimer
 from incanto.utils.logging import setup_logging
+from incanto.utils import winperf
 
 log = logging.getLogger("incanto")
 PREVIEW_WINDOW = "Incanto preview (Q to quit)"
@@ -27,12 +29,18 @@ def draw_fps(frame, fps: float) -> None:
 
 
 def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
-        lock_exposure: float | None = None) -> int:
+        lock_exposure: float | None = None, perf_tweaks: bool = True) -> int:
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
         log.error("Config error: %s", exc)
         return 2
+
+    log.info("System: cpu=%s | power mode=%s | power=%s | perf tweaks=%s",
+             platform.processor(), winperf.power_mode(), winperf.power_source(),
+             "on" if perf_tweaks else "off")
+    if perf_tweaks:
+        winperf.apply_perf_tweaks()
 
     cam = vcam = None
     try:
@@ -77,7 +85,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 log.info("FPS %.1f (avg over %.1fs) | %s | cpu=%.0f%% (of one core)",
                          frames_since_log / (now - last_log), now - last_log, stages,
                          proc.cpu_percent(None))
-                log.info("camera props: %s", cam.exposure_state())
+                log.info("camera props: %s | power=%s", cam.exposure_state(), winperf.power_source())
                 timer.reset()
                 last_log, frames_since_log = now, 0
             if max_seconds is not None and now - start >= max_seconds:
@@ -109,10 +117,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-preview", action="store_true", help="disable the local preview window")
     parser.add_argument("--lock-exposure", type=float, metavar="VALUE",
                         help="disable auto-exposure and set this fixed exposure (backend units, e.g. -6)")
+    parser.add_argument("--no-perf-tweaks", action="store_true",
+                        help="do not opt out of power throttling or raise process priority")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
     setup_logging(args.log_level)
-    return run(args.config, args.seconds, not args.no_preview, args.lock_exposure)
+    return run(args.config, args.seconds, not args.no_preview, args.lock_exposure, not args.no_perf_tweaks)
 
 
 if __name__ == "__main__":
