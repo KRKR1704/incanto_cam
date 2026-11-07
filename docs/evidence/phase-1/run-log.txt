@@ -1,0 +1,12 @@
+17:53:10 INFO    incanto.io.camera: Camera 0 opened: 1280x720 @ 30.0 fps (requested 1280x720 @ 30)
+17:53:10 INFO    incanto.io.vcam: Virtual camera started: OBS Virtual Camera (1280x720 @ 30 fps, backend=obs)
+17:53:10 INFO    incanto: Running. Press Q in the preview window to quit.
+17:53:15 INFO    incanto: FPS 27.7 (avg over 5.0s) | capture=24.4ms vcam=6.2ms
+17:53:20 INFO    incanto: FPS 29.9 (avg over 5.0s) | capture=21.7ms vcam=6.5ms
+17:53:25 INFO    incanto: FPS 30.0 (avg over 5.0s) | capture=21.5ms vcam=6.5ms
+17:53:30 INFO    incanto: FPS 30.0 (avg over 5.0s) | capture=22.9ms vcam=5.8ms
+17:53:35 INFO    incanto: FPS 30.1 (avg over 5.0s) | capture=22.5ms vcam=5.9ms
+17:53:40 INFO    incanto: FPS 29.9 (avg over 5.0s) | capture=23.0ms vcam=5.8ms
+17:53:42 INFO    incanto: Reached --seconds limit.
+17:53:42 INFO    incanto: Summary: 949 frames in 32.0s = 29.6 FPS average
+17:53:42 INFO    incanto: Shut down cleanly.

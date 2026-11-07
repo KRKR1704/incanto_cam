@@ -49,12 +49,12 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 
 | ID | Task | Depends on | Est. | Done |
 |---|---|---|---|---|
-| 1.1 | `config.py`: load `config.yaml` into typed dataclasses, with validation and clear error messages | 0.6 | 15m | [ ] |
-| 1.2 | `io/camera.py`: open the webcam at the configured resolution/FPS; report the actual resolution; fail clearly if no camera is found | 1.1 | 15m | [ ] |
-| 1.3 | `io/vcam.py`: wrap `pyvirtualcam` (backend from config); convert BGR → RGB; fail clearly if the driver is missing | 1.1 | 15m | [ ] |
-| 1.4 | `utils/fps.py`: rolling FPS counter + per-stage timer (context manager) | — | 10m | [ ] |
-| 1.5 | `main.py`: loop capture → vcam; preview window with FPS overlay (preview only); `Q` to quit; clean shutdown | 1.2, 1.3, 1.4 | 20m | [ ] |
-| 1.6 | `utils/logging.py`: console logging with levels; log FPS every 5 seconds | 1.5 | 5m | [ ] |
+| 1.1 | `config.py`: load `config.yaml` into typed dataclasses, with validation and clear error messages | 0.6 | 15m | [x] |
+| 1.2 | `io/camera.py`: open the webcam at the configured resolution/FPS; report the actual resolution; fail clearly if no camera is found | 1.1 | 15m | [x] |
+| 1.3 | `io/vcam.py`: wrap `pyvirtualcam` (backend from config); convert BGR → RGB; fail clearly if the driver is missing | 1.1 | 15m | [x] |
+| 1.4 | `utils/fps.py`: rolling FPS counter + per-stage timer (context manager) | — | 10m | [x] |
+| 1.5 | `main.py`: loop capture → vcam; preview window with FPS overlay (preview only); `Q` to quit; clean shutdown | 1.2, 1.3, 1.4 | 20m | [x] |
+| 1.6 | `utils/logging.py`: console logging with levels; log FPS every 5 seconds | 1.5 | 5m | [x] |
 | 1.7 | Run it and verify in Google Meet | 1.5 | 10m | [ ] |
 
 **Phase gate:** "OBS Virtual Camera" selected in Meet shows the live feed with no FPS overlay in it, and the logs show FPS ≥ 24. Save a Meet screenshot + log excerpt.
