@@ -5,3 +5,12 @@ dist/
 build/
 *.spec
 models/
+
+# Privacy: evidence images/media stay local (text logs are tracked)
+docs/evidence/**/*.png
+docs/evidence/**/*.jpg
+docs/evidence/**/*.mp4
+docs/evidence/**/*.wav
+*.jpg
+*.mp4
+*.wav
