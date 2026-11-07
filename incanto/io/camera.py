@@ -44,12 +44,43 @@ class Camera:
             log.warning("Camera did not accept %dx%d; using %dx%d", width, height,
                         self.width, self.height)
 
-    def read(self) -> np.ndarray:
-        """Return the next BGR frame, raising CameraError if the camera stops delivering."""
-        ok, frame = self._cap.read()
+    def read(self, timer=None) -> np.ndarray:
+        """Return the next BGR frame, raising CameraError if the camera stops delivering.
+
+        With a StageTimer, records "grab" (waiting for the camera) and "retrieve"
+        (decode/convert) separately.
+        """
+        if timer is None:
+            ok = self._cap.grab()
+            ok, frame = self._cap.retrieve() if ok else (False, None)
+        else:
+            with timer.stage("grab"):
+                ok = self._cap.grab()
+            with timer.stage("retrieve"):
+                ok, frame = self._cap.retrieve() if ok else (False, None)
         if not ok or frame is None:
             raise CameraError("Failed to read a frame from the webcam (disconnected or in use?).")
         return frame
+
+    def exposure_state(self) -> dict[str, float]:
+        """Current exposure-related properties as reported by the backend."""
+        return {
+            "exposure": self._cap.get(cv2.CAP_PROP_EXPOSURE),
+            "auto_exposure": self._cap.get(cv2.CAP_PROP_AUTO_EXPOSURE),
+            "fps": self._cap.get(cv2.CAP_PROP_FPS),
+        }
+
+    def lock_exposure(self, value: float) -> bool:
+        """Disable auto-exposure and set a fixed exposure. Returns True if it read back as set."""
+        before = self.exposure_state()
+        # 0.25 is the OpenCV convention for "manual"; some backends use 0 or 1.
+        auto_ret = self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+        exp_ret = self._cap.set(cv2.CAP_PROP_EXPOSURE, value)
+        after = self.exposure_state()
+        accepted = bool(exp_ret) and abs(after["exposure"] - value) < 1e-6
+        log.info("lock-exposure: requested exposure=%s | before=%s | set(auto=0.25)->%s set(exposure)->%s | after=%s | ACCEPTED=%s",
+                 value, before, auto_ret, exp_ret, after, accepted)
+        return accepted
 
     def release(self) -> None:
         self._cap.release()

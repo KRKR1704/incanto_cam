@@ -1,0 +1,28 @@
+18:10:20 INFO    incanto.io.camera: Camera 0 opened: 1280x720 @ 30.0 fps (requested 1280x720 @ 30)
+18:10:20 INFO    incanto.io.vcam: Virtual camera started: OBS Virtual Camera (1280x720 @ 30 fps, backend=obs)
+18:10:20 INFO    incanto: Running. Press Q in the preview window to quit.
+18:10:25 INFO    incanto: FPS 27.0 (avg over 5.0s) | grab=15.3ms retrieve=8.6ms vcam=6.4ms | cpu=146% (of one core)
+18:10:25 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:10:30 INFO    incanto: FPS 23.3 (avg over 5.1s) | grab=10.9ms retrieve=14.5ms vcam=8.2ms | cpu=110% (of one core)
+18:10:30 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:10:35 INFO    incanto: FPS 14.4 (avg over 5.0s) | grab=0.1ms retrieve=50.2ms vcam=10.1ms | cpu=58% (of one core)
+18:10:35 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:10:40 INFO    incanto: FPS 14.5 (avg over 5.0s) | grab=0.0ms retrieve=51.7ms vcam=8.9ms | cpu=66% (of one core)
+18:10:40 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:10:45 INFO    incanto: FPS 14.2 (avg over 5.1s) | grab=0.1ms retrieve=52.9ms vcam=9.0ms | cpu=78% (of one core)
+18:10:45 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:10:50 INFO    incanto: FPS 14.7 (avg over 5.0s) | grab=0.0ms retrieve=53.9ms vcam=7.8ms | cpu=68% (of one core)
+18:10:50 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:10:55 INFO    incanto: FPS 15.3 (avg over 5.0s) | grab=0.2ms retrieve=51.8ms vcam=7.4ms | cpu=71% (of one core)
+18:10:55 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:11:00 INFO    incanto: FPS 15.1 (avg over 5.0s) | grab=0.1ms retrieve=53.2ms vcam=7.2ms | cpu=76% (of one core)
+18:11:00 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:11:05 INFO    incanto: FPS 14.7 (avg over 5.0s) | grab=0.0ms retrieve=52.7ms vcam=8.5ms | cpu=65% (of one core)
+18:11:05 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:11:10 INFO    incanto: FPS 14.9 (avg over 5.1s) | grab=0.0ms retrieve=51.2ms vcam=8.5ms | cpu=78% (of one core)
+18:11:10 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:11:15 INFO    incanto: FPS 13.7 (avg over 5.0s) | grab=0.2ms retrieve=54.5ms vcam=9.3ms | cpu=58% (of one core)
+18:11:15 INFO    incanto: camera props: {'exposure': -6.0, 'auto_exposure': 0.0, 'fps': 30.0}
+18:11:20 INFO    incanto: Reached --seconds limit.
+18:11:20 INFO    incanto: Summary: 985 frames in 60.1s = 16.4 FPS average
+18:11:20 INFO    incanto: Shut down cleanly.

@@ -6,6 +6,7 @@ import logging
 import time
 
 import cv2
+import psutil
 
 from incanto.config import ConfigError, load_config
 from incanto.io.camera import Camera, CameraError
@@ -25,7 +26,8 @@ def draw_fps(frame, fps: float) -> None:
     cv2.putText(frame, text, (16, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
 
 
-def run(config_path: str | None, max_seconds: float | None, show_preview: bool) -> int:
+def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
+        lock_exposure: float | None = None) -> int:
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
@@ -37,17 +39,20 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool) 
         cam = Camera(cfg.video.width, cfg.video.height, cfg.video.fps)
         # Output size follows the real camera resolution so frames are always sent unchanged.
         vcam = VirtualCamera(cam.width, cam.height, cfg.video.fps, cfg.vcam.backend)
+        if lock_exposure is not None:
+            cam.lock_exposure(lock_exposure)
         if show_preview:
             cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_AUTOSIZE)
 
         fps_counter, timer = FpsCounter(), StageTimer()
+        proc = psutil.Process()
+        proc.cpu_percent(None)  # prime the counter
         start = last_log = time.perf_counter()
         frames = frames_since_log = 0
         log.info("Running. Press Q in the preview window to quit.")
 
         while True:
-            with timer.stage("capture"):
-                frame = cam.read()
+            frame = cam.read(timer)
             with timer.stage("vcam"):
                 vcam.send(frame)  # clean frame: no overlay ever reaches the virtual camera
             fps_counter.tick()
@@ -69,8 +74,10 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool) 
             now = time.perf_counter()
             if now - last_log >= FPS_LOG_INTERVAL_S:
                 stages = " ".join(f"{k}={v:.1f}ms" for k, v in timer.averages_ms().items())
-                log.info("FPS %.1f (avg over %.1fs) | %s",
-                         frames_since_log / (now - last_log), now - last_log, stages)
+                log.info("FPS %.1f (avg over %.1fs) | %s | cpu=%.0f%% (of one core)",
+                         frames_since_log / (now - last_log), now - last_log, stages,
+                         proc.cpu_percent(None))
+                log.info("camera props: %s", cam.exposure_state())
                 timer.reset()
                 last_log, frames_since_log = now, 0
             if max_seconds is not None and now - start >= max_seconds:
@@ -100,10 +107,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", help="path to config.yaml (default: project config.yaml)")
     parser.add_argument("--seconds", type=float, help="exit automatically after this many seconds")
     parser.add_argument("--no-preview", action="store_true", help="disable the local preview window")
+    parser.add_argument("--lock-exposure", type=float, metavar="VALUE",
+                        help="disable auto-exposure and set this fixed exposure (backend units, e.g. -6)")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
     setup_logging(args.log_level)
-    return run(args.config, args.seconds, not args.no_preview)
+    return run(args.config, args.seconds, not args.no_preview, args.lock_exposure)
 
 
 if __name__ == "__main__":
