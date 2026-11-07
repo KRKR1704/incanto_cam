@@ -55,7 +55,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 1.4 | `utils/fps.py`: rolling FPS counter + per-stage timer (context manager) | — | 10m | [x] |
 | 1.5 | `main.py`: loop capture → vcam; preview window with FPS overlay (preview only); `Q` to quit; clean shutdown | 1.2, 1.3, 1.4 | 20m | [x] |
 | 1.6 | `utils/logging.py`: console logging with levels; log FPS every 5 seconds | 1.5 | 5m | [x] |
-| 1.7 | Run it and verify in Google Meet | 1.5 | 10m | [ ] |
+| 1.7 | Run it and verify in Google Meet | 1.5 | 10m | [x] |
 
 **Phase gate:** "OBS Virtual Camera" selected in Meet shows the live feed with no FPS overlay in it, and the logs show FPS ≥ 24. Save a Meet screenshot + log excerpt.
 
