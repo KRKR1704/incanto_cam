@@ -1,0 +1,18 @@
+Phase 2 FPS tuning (live, 640px perception, preview window on, 25-30 s runs, ordinary background apps open)
+Numbers are 5 s log intervals; machine load varies, so read them as ranges.
+
+config                                   loop FPS    hands   segment  notes
+inline capture, segment every 1          13-15 *     19-36   11-12    camera read (grab+retrieve ~14 ms) is in series with everything
+inline capture, segment every 2          16-19       19-31   6        *first run of this config measured 15-17 FPS before the preview timing was added
+threaded capture, segment every 1        15-20       19-20   11       camera delivers 24-28 fps independent of the loop
+threaded capture, segment every 2        16-22       19-21   5-6      <- shipped default (video.capture_mode: threaded, perception.segment_every_n: 2)
+threaded + hands/segmentation in parallel threads
+  segment every 1                        13-16       37-44   14-22    WORSE: the two MediaPipe tasks fight for CPU. Removed.
+threaded, perception_width 480           12-14       21-34   10       no gain (hands time is not resolution-bound here). Not adopted.
+threaded, no preview window              16-22       19-20   11       preview costs ~8-10 ms per frame (copy, HUD, imshow, waitKey)
+threaded, process pinned to 12 P-core
+  logical CPUs (experiment only)         17-19       19-21   10       hands time stable at ~19 ms instead of 19-36, but FPS barely moves. Not adopted.
+
+Per-frame cost with the shipped config (ms): wait/camera ~8, hands ~20-35, segment ~6 (avg), vcam ~6, preview ~9.
+Hands time is bimodal (~19 ms and ~34 ms): the 34 ms intervals are the ones where both hands are in view or the
+process lands on slower cores. 120 s run: 16.9 FPS average. The >= 24 FPS phase-2 target is NOT met.

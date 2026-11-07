@@ -28,14 +28,16 @@ def _beep(freq: int) -> None:
         pass
 
 
-def grab_vcam_frames(out_dir: Path, name: str = "vcam-output") -> list[Path]:
-    """Open every DirectShow device we can and save one frame from each.
+def grab_vcam_frames(out_dir: Path, name: str = "vcam-output", skip: tuple[int, ...] = (0,)) -> list[Path]:
+    """Open the DirectShow devices after the physical webcam and save one frame from each.
 
-    The physical webcam is already held by Incanto, so the devices that open are the virtual
-    camera(s). The caller inspects the files to confirm which one is the virtual camera.
+    Index 0 is the physical webcam, which Incanto holds open; touching it would break capture,
+    so it is skipped. The caller inspects the files to confirm which one is the virtual camera.
     """
     saved = []
-    for index in range(6):
+    for index in range(1, 6):
+        if index in skip:
+            continue
         cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         if not cap.isOpened():
             cap.release()

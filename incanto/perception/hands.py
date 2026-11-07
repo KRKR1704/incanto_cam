@@ -19,9 +19,9 @@ class Hand:
     landmarks: np.ndarray    # (21, 3) float32; x, y normalized to the frame (0..1), z relative depth
 
 
-# Note: MediaPipe assumes a mirrored ("selfie view") image. Our frames are not mirrored,
-# so the label is from the camera's point of view and may be the opposite of the user's
-# actual hand. Gesture code should rely on geometry rather than this label where possible.
+# Note: MediaPipe documents that it expects a mirrored ("selfie view") image. Checked on our
+# unmirrored camera frames (docs/evidence/phase-2/): the label matches the person's real hand
+# (their right hand appears on the image-left and is labelled "Right").
 
 
 class HandTracker:

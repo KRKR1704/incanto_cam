@@ -65,15 +65,15 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 
 | ID | Task | Depends on | Est. | Done |
 |---|---|---|---|---|
-| 2.0 | `scripts/download_models.py`: fetch the official hand landmarker and selfie segmenter `.task` model files into `models/` (gitignored); skip files already present | 1.1 | 15m | [ ] |
-| 2.1 | Downscale helper: produce the perception frame at `perception_width`, keeping the aspect ratio | 1.5 | 10m | [ ] |
-| 2.2 | `perception/segmenter.py`: MediaPipe Tasks `ImageSegmenter` (selfie segmentation model from `models/`) → float mask at full output resolution | 2.1 | 30m | [ ] |
-| 2.3 | Mask edge smoothing: slight blur + threshold feathering | 2.2 | 15m | [ ] |
-| 2.4 | Temporal mask smoothing: blend with the previous frame's mask to stop flicker | 2.3 | 15m | [ ] |
-| 2.5 | `perception/hands.py`: MediaPipe Tasks `HandLandmarker` (model from `models/`) → landmarks for up to 2 hands, with handedness, in normalized coords | 2.1 | 30m | [ ] |
-| 2.6 | `render/overlay.py`: debug HUD with green mask tint + our own hand skeleton drawing (cv2 lines/circles from landmarks; no `mp.solutions.drawing_utils`), drawn on the preview copy only; toggle with `D` | 2.4, 2.5 | 20m | [ ] |
-| 2.7 | Add per-stage timing (hands, segmentation) to the FPS log | 1.4, 2.5 | 10m | [ ] |
-| 2.8 | If FPS < 24: segmentation every 2nd frame, reusing the last mask (config flag) | 2.7 | 15m | [ ] |
+| 2.0 | `scripts/download_models.py`: fetch the official hand landmarker and selfie segmenter `.task` model files into `models/` (gitignored); skip files already present | 1.1 | 15m | [x] |
+| 2.1 | Downscale helper: produce the perception frame at `perception_width`, keeping the aspect ratio | 1.5 | 10m | [x] |
+| 2.2 | `perception/segmenter.py`: MediaPipe Tasks `ImageSegmenter` (selfie segmentation model from `models/`) → float mask at full output resolution | 2.1 | 30m | [x] |
+| 2.3 | Mask edge smoothing: slight blur + threshold feathering | 2.2 | 15m | [x] |
+| 2.4 | Temporal mask smoothing: blend with the previous frame's mask to stop flicker | 2.3 | 15m | [x] |
+| 2.5 | `perception/hands.py`: MediaPipe Tasks `HandLandmarker` (model from `models/`) → landmarks for up to 2 hands, with handedness, in normalized coords | 2.1 | 30m | [x] |
+| 2.6 | `render/overlay.py`: debug HUD with green mask tint + our own hand skeleton drawing (cv2 lines/circles from landmarks; no `mp.solutions.drawing_utils`), drawn on the preview copy only; toggle with `D` | 2.4, 2.5 | 20m | [x] |
+| 2.7 | Add per-stage timing (hands, segmentation) to the FPS log | 1.4, 2.5 | 10m | [x] |
+| 2.8 | If FPS < 24: segmentation every 2nd frame, reusing the last mask (config flag) | 2.7 | 15m | [x] |
 
 **Phase gate:** A preview recording shows the mask following you cleanly and both hands tracked, at FPS ≥ 24. The Meet feed shows no debug overlay.
 
