@@ -14,12 +14,13 @@ class CameraError(RuntimeError):
 
 
 class Camera:
-    def __init__(self, width: int, height: int, fps: int, index: int = 0):
+    def __init__(self, width: int, height: int, fps: int, index: int = 0,
+                 backends: tuple[int, ...] = (cv2.CAP_MSMF, cv2.CAP_DSHOW)):
         self.index = index
         # Media Foundation first: on the dev laptop DirectShow was capped at ~5 fps at 720p
         # (it ignores the MJPG request), while MSMF delivers the full 30 fps.
         self._cap = None
-        for backend in (cv2.CAP_MSMF, cv2.CAP_DSHOW):
+        for backend in backends:
             cap = cv2.VideoCapture(index, backend)
             if cap.isOpened():
                 self._cap = cap
@@ -61,6 +62,10 @@ class Camera:
         if not ok or frame is None:
             raise CameraError("Failed to read a frame from the webcam (disconnected or in use?).")
         return frame
+
+    def show_driver_settings(self) -> bool:
+        """Ask the driver to show its own property dialog (DirectShow only)."""
+        return bool(self._cap.set(cv2.CAP_PROP_SETTINGS, 1))
 
     def exposure_state(self) -> dict[str, float]:
         """Current exposure-related properties as reported by the backend."""

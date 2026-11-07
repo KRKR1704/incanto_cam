@@ -73,6 +73,29 @@ def apply_perf_tweaks() -> None:
              "OK" if set_above_normal_priority() else "FAILED")
 
 
+def own_dialog_open() -> bool:
+    """True if this process currently has a visible top-level dialog window (class #32770)."""
+    if not IS_WINDOWS:
+        return False
+    user32 = ctypes.WinDLL("user32")
+    pid = ctypes.c_ulong(psutil.Process().pid).value
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _lparam):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            cls = ctypes.create_unicode_buffer(64)
+            user32.GetClassNameW(hwnd, cls, 64)
+            if cls.value == "#32770":
+                found.append(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    return bool(found)
+
+
 def power_mode() -> str:
     """Active Windows 11 power mode (the overlay slider), or 'unknown'."""
     if not IS_WINDOWS:
