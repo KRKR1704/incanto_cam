@@ -22,6 +22,7 @@ class VideoConfig:
     height: int = 720
     fps: int = 30
     perception_width: int = 640
+    capture_mode: str = "threaded"    # inline | threaded
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,7 @@ class PerceptionConfig:
     mask_feather_low: float = 0.35
     mask_feather_high: float = 0.65
     mask_temporal_alpha: float = 0.6
-    segment_every_n: int = 1
+    segment_every_n: int = 2
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,8 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError("video.width and video.height must be positive")
     if not 1 <= video.fps <= 120:
         raise ConfigError("video.fps must be between 1 and 120")
+    if video.capture_mode not in ("inline", "threaded"):
+        raise ConfigError("video.capture_mode must be 'inline' or 'threaded'")
     if not 0 < video.perception_width <= video.width:
         raise ConfigError("video.perception_width must be in (0, video.width]")
     if vcam.backend not in VCAM_BACKENDS:

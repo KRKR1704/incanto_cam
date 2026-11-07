@@ -89,3 +89,85 @@ class Camera:
 
     def release(self) -> None:
         self._cap.release()
+
+
+class ThreadedCamera:
+    """Wraps a Camera: a background thread keeps reading, `read()` returns the newest frame.
+
+    Camera waits and decode time then overlap with perception/render work on the main thread.
+    `read()` blocks until a frame newer than the last one returned is available, so no frame is
+    processed twice and none is returned stale.
+    """
+
+    def __init__(self, cam: Camera):
+        import threading
+        from incanto.utils.fps import StageTimer
+
+        self._cam = cam
+        self.width, self.height = cam.width, cam.height
+        self.timer = StageTimer()  # grab/retrieve timings, measured on the capture thread
+        self._cond = threading.Condition()
+        self._frame: np.ndarray | None = None
+        self._seq = 0
+        self._last_seq = 0
+        self._error: Exception | None = None
+        self._stop = False
+        self._delivered = 0
+        self._delivered_since = None
+        self._thread = threading.Thread(target=self._run, name="camera-capture", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        import time
+        try:
+            while not self._stop:
+                frame = self._cam.read(self.timer)
+                with self._cond:
+                    self._frame = frame
+                    self._seq += 1
+                    self._delivered += 1
+                    if self._delivered_since is None:
+                        self._delivered_since = time.perf_counter()
+                    self._cond.notify_all()
+        except Exception as exc:  # noqa: BLE001 - reported to the main thread via read()
+            with self._cond:
+                self._error = exc
+                self._cond.notify_all()
+
+    def read(self, timer=None) -> np.ndarray:
+        if timer is not None:
+            with timer.stage("wait_frame"):
+                return self._read()
+        return self._read()
+
+    def _read(self) -> np.ndarray:
+        with self._cond:
+            ok = self._cond.wait_for(lambda: self._seq > self._last_seq or self._error, timeout=5.0)
+            if self._error:
+                raise CameraError(f"Capture thread stopped: {self._error}")
+            if not ok:
+                raise CameraError("Timed out waiting for a frame from the webcam.")
+            self._last_seq = self._seq
+            return self._frame
+
+    def pop_delivery_fps(self) -> float:
+        """Frames the camera delivered per second since the previous call (independent of the loop)."""
+        import time
+        with self._cond:
+            now = time.perf_counter()
+            fps = 0.0
+            if self._delivered_since is not None and now > self._delivered_since:
+                fps = self._delivered / (now - self._delivered_since)
+            self._delivered, self._delivered_since = 0, now
+            return fps
+
+    def exposure_state(self) -> dict[str, float]:
+        return self._cam.exposure_state()
+
+    def lock_exposure(self, value: float) -> bool:
+        return self._cam.lock_exposure(value)
+
+    def release(self) -> None:
+        self._stop = True
+        self._thread.join(timeout=3.0)
+        self._cam.release()

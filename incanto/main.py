@@ -2,30 +2,35 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import platform
+import threading
 import time
 
 import cv2
 import psutil
 
 from incanto.config import ConfigError, load_config
-from incanto.io.camera import Camera, CameraError
+from incanto.io.camera import Camera, CameraError, ThreadedCamera
 from incanto.io.vcam import VCamError, VirtualCamera
-from incanto.utils.fps import FpsCounter, StageTimer
-from incanto.utils.logging import setup_logging
+from incanto.perception.hands import HandTracker
+from incanto.perception.segmenter import Segmenter
+from incanto.render import overlay
+from incanto.render.compositor import Compositor
 from incanto.utils import winperf
+from incanto.utils.evidence import EvidenceSession, grab_vcam_frames
+from incanto.utils.fps import FpsCounter, StageTimer
+from incanto.utils.imaging import downscale
+from incanto.utils.logging import setup_logging
 
 log = logging.getLogger("incanto")
-PREVIEW_WINDOW = "Incanto preview (Q to quit)"
+PREVIEW_WINDOW = "Incanto preview (Q quit, D debug HUD)"
 FPS_LOG_INTERVAL_S = 5.0
 
 
-def draw_fps(frame, fps: float) -> None:
-    """Draw the FPS counter onto `frame` in place. Call only on the preview copy."""
-    text = f"{fps:5.1f} FPS"
-    cv2.putText(frame, text, (16, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 4, cv2.LINE_AA)
-    cv2.putText(frame, text, (16, 36), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv2.LINE_AA)
+class SetupError(RuntimeError):
+    """A required file or resource is missing."""
 
 
 def show_camera_settings(config_path: str | None) -> int:
@@ -61,12 +66,20 @@ def show_camera_settings(config_path: str | None) -> int:
 
 
 def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
-        lock_exposure: float | None = None, perf_tweaks: bool = True) -> int:
+        lock_exposure: float | None = None, perf_tweaks: bool = True,
+        segment_every: int | None = None, evidence_dir: str | None = None,
+        capture_mode: str | None = None) -> int:
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
         log.error("Config error: %s", exc)
         return 2
+    if segment_every is not None:
+        cfg = dataclasses.replace(
+            cfg, perception=dataclasses.replace(cfg.perception, segment_every_n=segment_every))
+
+    if capture_mode is not None:
+        cfg = dataclasses.replace(cfg, video=dataclasses.replace(cfg.video, capture_mode=capture_mode))
 
     log.info("System: cpu=%s | power mode=%s | power=%s | perf tweaks=%s",
              platform.processor(), winperf.power_mode(), winperf.power_source(),
@@ -74,53 +87,111 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
     if perf_tweaks:
         winperf.apply_perf_tweaks()
 
-    cam = vcam = None
+    cam = vcam = hands = segmenter = None
     try:
-        cam = Camera(cfg.video.width, cfg.video.height, cfg.video.fps)
+        hands_model = cfg.models.resolve("hand_landmarker")
+        seg_model = cfg.models.resolve("selfie_segmenter")
+        for path in (hands_model, seg_model):
+            if not path.exists():
+                raise SetupError(f"Model file missing: {path}\n"
+                                 "  Run: python scripts/download_models.py")
+
+        raw_cam = Camera(cfg.video.width, cfg.video.height, cfg.video.fps)
+        threaded = cfg.video.capture_mode == "threaded"
+        cam = ThreadedCamera(raw_cam) if threaded else raw_cam
         # Output size follows the real camera resolution so frames are always sent unchanged.
+        out_size = (cam.width, cam.height)
         vcam = VirtualCamera(cam.width, cam.height, cfg.video.fps, cfg.vcam.backend)
         if lock_exposure is not None:
             cam.lock_exposure(lock_exposure)
+        log.info("Capture mode: %s", cfg.video.capture_mode)
+
+        p = cfg.perception
+        hands = HandTracker(hands_model, num_hands=p.num_hands,
+                            min_detection_confidence=p.hand_min_detection_confidence,
+                            min_presence_confidence=p.hand_min_presence_confidence,
+                            min_tracking_confidence=p.hand_min_tracking_confidence)
+        segmenter = Segmenter(seg_model, out_size, blur_px=p.mask_blur_px,
+                              feather_low=p.mask_feather_low, feather_high=p.mask_feather_high,
+                              temporal_alpha=p.mask_temporal_alpha, every_n=p.segment_every_n)
+        compositor = Compositor()
+        log.info("Perception ready: perception_width=%d, hands=%d, segment every %d frame(s)",
+                 cfg.video.perception_width, p.num_hands, p.segment_every_n)
+
         if show_preview:
             cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_AUTOSIZE)
+        evidence = EvidenceSession(evidence_dir) if evidence_dir and show_preview else None
 
         fps_counter, timer = FpsCounter(), StageTimer()
         rx_first = rx_last = None  # read-completion times, for the camera delivery rate
         rx_count = 0
         proc = psutil.Process()
         proc.cpu_percent(None)  # prime the counter
-        start = last_log = time.perf_counter()
+        start = last_log = last_frame = time.perf_counter()
         frames = frames_since_log = 0
-        log.info("Running. Press Q in the preview window to quit.")
+        hud_on = True
+        last_stage_ms: dict[str, float] = {}
+        log.info("Running. Q quits, D toggles the debug HUD (preview only).")
 
         while True:
             frame = cam.read(timer)
-            rx_last = time.perf_counter()
+            now = time.perf_counter()
+            dt = now - last_frame  # seconds since the previous frame; effects must use this
+            last_frame = now
+            rx_last = now
             if rx_first is None:
                 rx_first = rx_last
             rx_count += 1
+
+            with timer.stage("downscale"):
+                small = downscale(frame, cfg.video.perception_width)
+            with timer.stage("hands"):
+                hand_list = hands.detect(small)
+            with timer.stage("segment"):
+                mask = segmenter.segment(small)
+
+            out = compositor.render(frame, mask, None, dt)
             with timer.stage("vcam"):
-                vcam.send(frame)  # clean frame: no overlay ever reaches the virtual camera
+                vcam.send(out)  # clean frame: no debug drawing ever reaches the virtual camera
             fps_counter.tick()
             frames += 1
             frames_since_log += 1
 
             if show_preview:
-                preview = frame.copy()
-                draw_fps(preview, fps_counter.fps)
+                t_preview = time.perf_counter()
+                preview = out.copy()  # all debug drawing happens on this copy only
+                if hud_on:
+                    overlay.draw_debug(preview, mask, hand_list, last_stage_ms)
+                overlay.draw_fps(preview, fps_counter.fps)
+                if evidence:
+                    evidence.update(preview, lambda: threading.Thread(
+                        target=grab_vcam_frames, args=(evidence.out_dir,), daemon=True).start())
                 cv2.imshow(PREVIEW_WINDOW, preview)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord("q"), ord("Q")):
                     log.info("Quit requested.")
                     break
+                if key in (ord("d"), ord("D")):
+                    hud_on = not hud_on
+                    log.info("Debug HUD %s", "on" if hud_on else "off")
                 if cv2.getWindowProperty(PREVIEW_WINDOW, cv2.WND_PROP_VISIBLE) < 1:
                     log.info("Preview window closed.")
                     break
+                if evidence and evidence.done:
+                    log.info("Evidence capture finished.")
+                    break
+                timer.add("preview", time.perf_counter() - t_preview)
 
             now = time.perf_counter()
             if now - last_log >= FPS_LOG_INTERVAL_S:
-                stages = " ".join(f"{k}={v:.1f}ms" for k, v in timer.averages_ms().items())
-                rx_fps = (rx_count - 1) / (rx_last - rx_first) if rx_count > 1 and rx_last > rx_first else 0.0
+                averages = {**(cam.timer.averages_ms() if threaded else {}), **timer.averages_ms()}
+                last_stage_ms = {k: averages[k] for k in ("hands", "segment") if k in averages}
+                stages = " ".join(f"{k}={v:.1f}ms" for k, v in averages.items())
+                if threaded:
+                    rx_fps = cam.pop_delivery_fps()
+                    cam.timer.reset()
+                else:
+                    rx_fps = (rx_count - 1) / (rx_last - rx_first) if rx_count > 1 and rx_last > rx_first else 0.0
                 log.info("FPS %.1f (avg over %.1fs) | camera delivers %.1f fps | %s | cpu=%.0f%% (of one core)",
                          frames_since_log / (now - last_log), now - last_log, rx_fps, stages,
                          proc.cpu_percent(None))
@@ -135,15 +206,16 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         elapsed = time.perf_counter() - start
         log.info("Summary: %d frames in %.1fs = %.1f FPS average", frames, elapsed, frames / elapsed)
         return 0
-    except (CameraError, VCamError) as exc:
+    except (CameraError, VCamError, SetupError) as exc:
         log.error("%s", exc)
         return 1
     except KeyboardInterrupt:
         log.info("Interrupted.")
         return 0
     finally:
-        if vcam:
-            vcam.close()
+        for closable in (hands, segmenter, vcam):
+            if closable:
+                closable.close() if hasattr(closable, "close") else None
         if cam:
             cam.release()
         cv2.destroyAllWindows()
@@ -161,12 +233,19 @@ def main(argv: list[str] | None = None) -> int:
                         help="do not opt out of power throttling or raise process priority")
     parser.add_argument("--camera-settings", action="store_true",
                         help="show the camera driver's own property dialog (DirectShow), wait for it to close, then exit")
+    parser.add_argument("--segment-every", type=int, metavar="N",
+                        help="override perception.segment_every_n from config.yaml")
+    parser.add_argument("--capture-mode", choices=("inline", "threaded"),
+                        help="override video.capture_mode from config.yaml")
+    parser.add_argument("--evidence", metavar="DIR",
+                        help="guided capture of 3 preview screenshots + virtual camera frames into DIR")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
     setup_logging(args.log_level)
     if args.camera_settings:
         return show_camera_settings(args.config)
-    return run(args.config, args.seconds, not args.no_preview, args.lock_exposure, not args.no_perf_tweaks)
+    return run(args.config, args.seconds, not args.no_preview, args.lock_exposure,
+               not args.no_perf_tweaks, args.segment_every, args.evidence, args.capture_mode)
 
 
 if __name__ == "__main__":

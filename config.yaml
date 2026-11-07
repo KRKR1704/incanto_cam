@@ -3,6 +3,7 @@ video:
   height: 720
   fps: 30
   perception_width: 640        # downscaled for detection
+  capture_mode: threaded       # inline | threaded (background thread holds the latest frame)
 
 models:                        # fetched by scripts/download_models.py
   hand_landmarker: models/hand_landmarker.task
@@ -17,7 +18,8 @@ perception:
   mask_feather_low: 0.35       # confidence at/below this -> 0
   mask_feather_high: 0.65      # confidence at/above this -> 1 (smooth in between)
   mask_temporal_alpha: 0.6     # weight of the new mask vs the previous one (1 = no smoothing)
-  segment_every_n: 1           # run segmentation every Nth frame, reuse the last mask otherwise
+  segment_every_n: 2           # run segmentation every Nth frame, reuse the last mask otherwise
+                               # (2: loop was 17-20 fps with 1; see docs/evidence/phase-2/)
 
 vcam:
   backend: obs                 # obs | unitycapture

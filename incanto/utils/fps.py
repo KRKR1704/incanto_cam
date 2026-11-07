@@ -39,6 +39,10 @@ class StageTimer:
             self._total[name] += time.perf_counter() - start
             self._count[name] += 1
 
+    def add(self, name: str, seconds: float) -> None:
+        self._total[name] += seconds
+        self._count[name] += 1
+
     def averages_ms(self) -> dict[str, float]:
         return {k: 1000 * self._total[k] / self._count[k] for k in self._total if self._count[k]}
 
