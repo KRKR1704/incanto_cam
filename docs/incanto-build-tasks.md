@@ -22,10 +22,10 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 3 | Clean plate | 6 | 1 h | ☐ |
 | 4 | Record & replay | 7 | 1.5 h | ☐ |
 | 5 | Gesture engine | 11 | 4 h | ☐ |
-| 6 | Vanish spell | 10 | 4 h | ☐ |
+| 6 | Vanish spell | 11 | 4 h | ☐ |
 | 7 | More spells | 7 | 5 h | ☐ |
 | 8 | Polish & packaging | 10 | 3 h | ☐ |
-| **Total** | | **74** | **~23 h** | |
+| **Total** | | **75** | **~23 h** | |
 
 ---
 
@@ -146,6 +146,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 6.8 | Reverting: particles fly back in reverse and the live you fades back in; triggered by the next snap | 6.6 | 30m | [ ] |
 | 6.9 | Hotkey `C`: cancel any spell immediately back to Idle | 6.3 | 5m | [ ] |
 | 6.10 | Render the effect on a replay clip with `--render-out`, review, and tune particle size/speed/stagger | 4.5, 6.8 | 30m | [ ] |
+| 6.11 | Mask fingertip gaps: dilate the mask slightly and union it with a convex hull from the hand landmarks before vanish compositing (the 144x256 segmentation model misses thin fingertips; seen in Phase 2 screenshots) | 6.5, 2.5 | 30m | [ ] |
 
 **Phase gate:** A screen recording **inside a Meet call** of the full cycle: snap → dissolve → invisible while moving → snap → reassemble, with FPS ≥ 24 throughout (log excerpt).
 

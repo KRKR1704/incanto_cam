@@ -1,0 +1,22 @@
+Phase 2 FPS fix: hands decoupled from the main loop (option 1)
+
+Design
+- HandsWorker thread takes the LATEST frame (single slot, stale frames overwritten, nothing queues),
+  runs HandLandmarker, publishes a result stamped with the frame's capture time. The main loop reads the
+  newest result and never waits on it.
+- Segmentation stays in the main loop, every 2nd frame (mask must match the composited frame).
+- Preview window updates every 2nd frame (preview.every_n: 2); the virtual camera gets every frame.
+- Thread limits: MediaPipe 1.2.2's Python Tasks API exposes NO thread-count option (BaseOptions has only
+  model_asset_path, model_asset_buffer, delegate; HandLandmarkerOptions/ImageSegmenterOptions have none).
+  So internal XNNPACK threads could not be limited per runner; nothing was set. The two runners now overlap
+  in time but did not slow each other down in the 120 s run (hands 15-23 ms, segment 3-5 ms).
+
+Result (docs/evidence/phase-2/run-log-decoupled.txt, 120 s live, preview on)
+- 3075 frames / 120.0 s = 25.6 FPS average (gate: >= 24).
+- First ~40 s: 20-23 FPS, but camera delivery was also 20-23 fps (grab ~2 ms, retrieve ~43 ms = the camera
+  driver's slow phase seen in Phase 1). Loop FPS tracked camera delivery within ~1 fps in every interval;
+  the loop is camera-bound, not compute-bound. After ~45 s the camera delivered 26-30 fps and so did the loop.
+- Hands: 20-28 Hz, inference 14-23 ms, result age at use 44-62 ms (capture -> consumed by the main loop).
+- Segmentation 3.3-4.6 ms per frame (every 2nd frame), vcam send 3.1-3.7 ms, preview ~7 ms per preview frame.
+
+Caveat: the 24 FPS gate cannot be met when the camera itself delivers < 24 fps (low-light phases).
