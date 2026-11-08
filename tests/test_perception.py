@@ -60,3 +60,27 @@ def test_segmenter_every_n_reuses_last_mask():
         assert second is first
     finally:
         seg.close()
+
+
+@needs_models
+def test_hands_worker_publishes_latest_result_without_blocking():
+    import time
+
+    from incanto.perception.hands import HandsWorker
+
+    worker = HandsWorker(HandTracker(HANDS_MODEL, num_hands=2))
+    try:
+        assert worker.latest().seq == 0  # nothing yet, and latest() returned immediately
+        stamp = time.perf_counter()
+        for _ in range(5):  # burst of submits: stale frames are overwritten, never queued
+            worker.submit(downscale(blank(), 640), stamp)
+        deadline = time.perf_counter() + 5
+        while worker.latest().seq == 0 and time.perf_counter() < deadline:
+            time.sleep(0.01)
+        result = worker.latest()
+        assert result.seq >= 1
+        assert result.hands == []
+        assert result.frame_time == stamp
+        assert result.seq <= 5
+    finally:
+        worker.close()
