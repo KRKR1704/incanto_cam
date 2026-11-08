@@ -47,6 +47,12 @@ class PerceptionConfig:
     mask_feather_high: float = 0.65
     mask_temporal_alpha: float = 0.6
     segment_every_n: int = 2
+    hands_async: bool = True
+
+
+@dataclass(frozen=True)
+class PreviewConfig:
+    every_n: int = 2
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,7 @@ class Config:
     vcam: VCamConfig = field(default_factory=VCamConfig)
     models: ModelsConfig = field(default_factory=ModelsConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
+    preview: PreviewConfig = field(default_factory=PreviewConfig)
     triggers: TriggersConfig = field(default_factory=TriggersConfig)
     mappings: dict[str, str] = field(default_factory=dict)
     gestures: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -115,6 +122,7 @@ def load_config(path: str | Path | None = None) -> Config:
     triggers = _build(TriggersConfig, "triggers", _section(raw, "triggers"))
     models = _build(ModelsConfig, "models", _section(raw, "models"))
     perception = _build(PerceptionConfig, "perception", _section(raw, "perception"))
+    preview = _build(PreviewConfig, "preview", _section(raw, "preview"))
 
     if video.width <= 0 or video.height <= 0:
         raise ConfigError("video.width and video.height must be positive")
@@ -146,6 +154,9 @@ def load_config(path: str | Path | None = None) -> Config:
     if perception.segment_every_n < 1:
         raise ConfigError("perception.segment_every_n must be >= 1")
 
+    if preview.every_n < 1:
+        raise ConfigError("preview.every_n must be >= 1")
+
     mappings = _section(raw, "mappings")
     for gesture, spell in mappings.items():
         if not isinstance(spell, str):
@@ -156,6 +167,7 @@ def load_config(path: str | Path | None = None) -> Config:
         vcam=vcam,
         models=models,
         perception=perception,
+        preview=preview,
         triggers=triggers,
         mappings=dict(mappings),
         gestures=_section(raw, "gestures"),

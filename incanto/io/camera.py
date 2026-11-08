@@ -110,6 +110,8 @@ class ThreadedCamera:
         self._frame: np.ndarray | None = None
         self._seq = 0
         self._last_seq = 0
+        self._frame_time = 0.0
+        self.frame_time = 0.0  # perf_counter() when the frame last returned by read() arrived
         self._error: Exception | None = None
         self._stop = False
         self._delivered = 0
@@ -124,6 +126,7 @@ class ThreadedCamera:
                 frame = self._cam.read(self.timer)
                 with self._cond:
                     self._frame = frame
+                    self._frame_time = time.perf_counter()
                     self._seq += 1
                     self._delivered += 1
                     if self._delivered_since is None:
@@ -148,6 +151,7 @@ class ThreadedCamera:
             if not ok:
                 raise CameraError("Timed out waiting for a frame from the webcam.")
             self._last_seq = self._seq
+            self.frame_time = self._frame_time
             return self._frame
 
     def pop_delivery_fps(self) -> float:

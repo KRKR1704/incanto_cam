@@ -50,3 +50,87 @@ class HandTracker:
 
     def close(self) -> None:
         self._landmarker.close()
+
+
+@dataclass(frozen=True)
+class HandsResult:
+    """Most recent hand-tracking result, stamped with the capture time of the frame it came from."""
+    hands: list[Hand]
+    frame_time: float        # time.perf_counter() when that frame was captured
+    infer_ms: float          # how long the HandLandmarker call took
+    seq: int                 # increments with every published result (0 = nothing yet)
+
+
+class HandsWorker:
+    """Runs HandTracker on its own thread, always on the LATEST submitted frame.
+
+    `submit()` replaces any pending frame (stale frames are dropped, nothing queues up) and
+    never blocks. `latest()` returns the newest published result immediately; the main loop
+    never waits on hand tracking. Result age = now - result.frame_time.
+    """
+
+    def __init__(self, tracker: HandTracker):
+        import threading
+
+        self._tracker = tracker
+        self._cond = threading.Condition()
+        self._pending: tuple[np.ndarray, float] | None = None
+        self._result = HandsResult([], 0.0, 0.0, 0)
+        self._stop = False
+        self._error: Exception | None = None
+        self._published = 0
+        self._published_since: float | None = None
+        self._infer_total = 0.0
+        self._thread = threading.Thread(target=self._run, name="hands-worker", daemon=True)
+        self._thread.start()
+
+    def submit(self, small_bgr: np.ndarray, frame_time: float) -> None:
+        with self._cond:
+            self._pending = (small_bgr, frame_time)  # overwrite: drop the stale frame
+            self._cond.notify()
+
+    def latest(self) -> HandsResult:
+        if self._error:
+            raise RuntimeError(f"hands worker stopped: {self._error}") from self._error
+        return self._result
+
+    def _run(self) -> None:
+        import time
+        try:
+            while True:
+                with self._cond:
+                    self._cond.wait_for(lambda: self._pending is not None or self._stop)
+                    if self._stop:
+                        return
+                    frame, frame_time = self._pending
+                    self._pending = None
+                t0 = time.perf_counter()
+                hands = self._tracker.detect(frame)
+                done = time.perf_counter()
+                with self._cond:
+                    self._result = HandsResult(hands, frame_time, 1000 * (done - t0), self._result.seq + 1)
+                    self._published += 1
+                    self._infer_total += done - t0
+                    if self._published_since is None:
+                        self._published_since = t0
+        except Exception as exc:  # noqa: BLE001 - surfaced to the main thread via latest()
+            self._error = exc
+
+    def pop_stats(self) -> tuple[float, float]:
+        """(results per second, mean inference ms) since the previous call."""
+        import time
+        with self._cond:
+            now = time.perf_counter()
+            hz = ms = 0.0
+            if self._published and self._published_since is not None and now > self._published_since:
+                hz = self._published / (now - self._published_since)
+                ms = 1000 * self._infer_total / self._published
+            self._published, self._infer_total, self._published_since = 0, 0.0, now
+            return hz, ms
+
+    def close(self) -> None:
+        with self._cond:
+            self._stop = True
+            self._cond.notify_all()
+        self._thread.join(timeout=3.0)
+        self._tracker.close()

@@ -14,7 +14,7 @@ import psutil
 from incanto.config import ConfigError, load_config
 from incanto.io.camera import Camera, CameraError, ThreadedCamera
 from incanto.io.vcam import VCamError, VirtualCamera
-from incanto.perception.hands import HandTracker
+from incanto.perception.hands import HandsWorker, HandTracker
 from incanto.perception.segmenter import Segmenter
 from incanto.render import overlay
 from incanto.render.compositor import Compositor
@@ -107,16 +107,18 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         log.info("Capture mode: %s", cfg.video.capture_mode)
 
         p = cfg.perception
-        hands = HandTracker(hands_model, num_hands=p.num_hands,
-                            min_detection_confidence=p.hand_min_detection_confidence,
-                            min_presence_confidence=p.hand_min_presence_confidence,
-                            min_tracking_confidence=p.hand_min_tracking_confidence)
+        tracker = HandTracker(hands_model, num_hands=p.num_hands,
+                              min_detection_confidence=p.hand_min_detection_confidence,
+                              min_presence_confidence=p.hand_min_presence_confidence,
+                              min_tracking_confidence=p.hand_min_tracking_confidence)
+        hands = HandsWorker(tracker) if p.hands_async else tracker
         segmenter = Segmenter(seg_model, out_size, blur_px=p.mask_blur_px,
                               feather_low=p.mask_feather_low, feather_high=p.mask_feather_high,
                               temporal_alpha=p.mask_temporal_alpha, every_n=p.segment_every_n)
         compositor = Compositor()
-        log.info("Perception ready: perception_width=%d, hands=%d, segment every %d frame(s)",
-                 cfg.video.perception_width, p.num_hands, p.segment_every_n)
+        log.info("Perception ready: perception_width=%d, hands=%d (%s), segment every %d frame(s), preview every %d frame(s)",
+                 cfg.video.perception_width, p.num_hands, "async thread" if p.hands_async else "inline",
+                 p.segment_every_n, cfg.preview.every_n)
 
         if show_preview:
             cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_AUTOSIZE)
@@ -145,8 +147,16 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
 
             with timer.stage("downscale"):
                 small = downscale(frame, cfg.video.perception_width)
-            with timer.stage("hands"):
-                hand_list = hands.detect(small)
+            if p.hands_async:
+                # Never waits: hand the newest frame to the worker, use whatever result is newest.
+                hands.submit(small, getattr(cam, "frame_time", now))
+                hand_result = hands.latest()
+                hand_list = hand_result.hands
+                if hand_result.seq:
+                    timer.add("hands_age", time.perf_counter() - hand_result.frame_time)
+            else:
+                with timer.stage("hands"):
+                    hand_list = hands.detect(small)
             with timer.stage("segment"):
                 mask = segmenter.segment(small)
 
@@ -157,7 +167,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
             frames += 1
             frames_since_log += 1
 
-            if show_preview:
+            if show_preview and frames % cfg.preview.every_n == 0:
                 t_preview = time.perf_counter()
                 preview = out.copy()  # all debug drawing happens on this copy only
                 if hud_on:
@@ -185,6 +195,10 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
             now = time.perf_counter()
             if now - last_log >= FPS_LOG_INTERVAL_S:
                 averages = {**(cam.timer.averages_ms() if threaded else {}), **timer.averages_ms()}
+                hands_hz = hands_ms = None
+                if p.hands_async:
+                    hands_hz, hands_ms = hands.pop_stats()
+                    averages["hands"] = hands_ms  # inference time, measured on the worker thread
                 last_stage_ms = {k: averages[k] for k in ("hands", "segment") if k in averages}
                 stages = " ".join(f"{k}={v:.1f}ms" for k, v in averages.items())
                 if threaded:
@@ -196,6 +210,9 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                          frames_since_log / (now - last_log), now - last_log, rx_fps, stages,
                          proc.cpu_percent(None))
                 rx_first, rx_count = None, 0
+                if p.hands_async:
+                    log.info("hands worker: %.1f Hz, inference %.1f ms, result age %.1f ms (at main-loop use)",
+                             hands_hz, hands_ms, averages.get("hands_age", 0.0))
                 log.info("camera props: %s | power=%s", cam.exposure_state(), winperf.power_source())
                 timer.reset()
                 last_log, frames_since_log = now, 0
