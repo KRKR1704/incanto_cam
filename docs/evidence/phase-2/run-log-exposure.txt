@@ -1,0 +1,80 @@
+19:18:57 INFO    incanto: System: cpu=Intel64 Family 6 Model 183 Stepping 1, GenuineIntel | power mode=Balanced (no overlay) | power=AC 100% | perf tweaks=on
+19:18:57 INFO    incanto.utils.winperf: perf tweaks: power throttling opt-out=OK, ABOVE_NORMAL priority=OK
+19:19:00 INFO    incanto.io.camera: Camera 0 opened: 1280x720 @ 30.0 fps (requested 1280x720 @ 30)
+19:19:01 INFO    incanto.io.camera: exposure: requested auto | set() accepted=True | mean brightness 113 -> 113
+19:19:01 INFO    incanto.io.vcam: Virtual camera started: OBS Virtual Camera (1280x720 @ 30 fps, backend=obs)
+19:19:01 INFO    incanto: Capture mode: threaded
+19:19:01 INFO    incanto: Perception ready: perception_width=640, hands=2 (async thread), segment every 2 frame(s), preview every 2 frame(s)
+19:19:01 INFO    incanto: Running. Q quits, D toggles the debug HUD (preview only).
+19:19:06 INFO    incanto: FPS 30.1 (avg over 5.0s) | camera delivers 30.1 fps | grab=23.5ms retrieve=9.6ms wait_frame=21.0ms downscale=0.2ms segment=4.4ms vcam=3.5ms hands_age=55.8ms preview=7.5ms hands=13.7ms | cpu=146% (of one core)
+19:19:06 INFO    incanto: hands worker: 29.9 Hz, inference 13.7 ms, result age 55.8 ms (at main-loop use)
+19:19:06 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:11 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.2ms grab=22.1ms wait_frame=22.0ms downscale=0.2ms hands_age=48.7ms segment=3.7ms vcam=3.5ms preview=7.4ms hands=12.7ms | cpu=128% (of one core)
+19:19:11 INFO    incanto: hands worker: 30.0 Hz, inference 12.7 ms, result age 48.7 ms (at main-loop use)
+19:19:11 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:16 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.3ms grab=22.0ms wait_frame=21.7ms downscale=0.2ms hands_age=45.7ms segment=3.8ms vcam=3.4ms preview=8.0ms hands=12.8ms | cpu=152% (of one core)
+19:19:16 INFO    incanto: hands worker: 30.0 Hz, inference 12.8 ms, result age 45.7 ms (at main-loop use)
+19:19:16 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:21 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.1ms grab=22.2ms wait_frame=22.5ms downscale=0.2ms hands_age=44.6ms segment=3.5ms vcam=3.2ms preview=7.4ms hands=12.4ms | cpu=126% (of one core)
+19:19:21 INFO    incanto: hands worker: 30.0 Hz, inference 12.4 ms, result age 44.6 ms (at main-loop use)
+19:19:21 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:26 INFO    incanto: FPS 30.2 (avg over 5.0s) | camera delivers 30.2 fps | retrieve=11.0ms grab=22.1ms wait_frame=22.9ms downscale=0.2ms hands_age=41.8ms segment=3.4ms vcam=3.2ms preview=6.2ms hands=12.7ms | cpu=104% (of one core)
+19:19:26 INFO    incanto: hands worker: 30.2 Hz, inference 12.7 ms, result age 41.8 ms (at main-loop use)
+19:19:26 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:31 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 30.1 fps | retrieve=11.0ms grab=22.3ms wait_frame=23.2ms downscale=0.2ms hands_age=48.7ms segment=3.4ms vcam=3.2ms preview=6.3ms hands=12.4ms | cpu=111% (of one core)
+19:19:31 INFO    incanto: hands worker: 29.9 Hz, inference 12.4 ms, result age 48.7 ms (at main-loop use)
+19:19:31 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:36 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 29.8 fps | grab=22.5ms retrieve=10.8ms wait_frame=22.7ms downscale=0.2ms hands_age=51.1ms segment=3.5ms vcam=3.3ms preview=6.5ms hands=12.9ms | cpu=124% (of one core)
+19:19:36 INFO    incanto: hands worker: 30.0 Hz, inference 12.9 ms, result age 51.1 ms (at main-loop use)
+19:19:36 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:41 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=10.8ms grab=22.5ms wait_frame=23.3ms downscale=0.2ms hands_age=49.7ms segment=3.4ms vcam=3.0ms preview=6.4ms hands=12.6ms | cpu=147% (of one core)
+19:19:41 INFO    incanto: hands worker: 30.0 Hz, inference 12.6 ms, result age 49.7 ms (at main-loop use)
+19:19:41 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:46 INFO    incanto: FPS 30.1 (avg over 5.0s) | camera delivers 30.1 fps | retrieve=10.9ms grab=22.2ms wait_frame=22.8ms downscale=0.2ms hands_age=45.7ms segment=3.6ms vcam=3.4ms preview=6.2ms hands=12.7ms | cpu=143% (of one core)
+19:19:46 INFO    incanto: hands worker: 30.1 Hz, inference 12.7 ms, result age 45.7 ms (at main-loop use)
+19:19:46 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:51 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.2ms grab=22.2ms wait_frame=21.8ms downscale=0.2ms hands_age=43.2ms segment=3.7ms vcam=3.4ms preview=8.0ms hands=12.7ms | cpu=137% (of one core)
+19:19:51 INFO    incanto: hands worker: 30.0 Hz, inference 12.7 ms, result age 43.2 ms (at main-loop use)
+19:19:51 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:19:56 INFO    incanto: FPS 29.8 (avg over 5.0s) | camera delivers 29.8 fps | retrieve=11.3ms grab=22.2ms wait_frame=21.4ms downscale=0.2ms hands_age=49.8ms segment=3.7ms vcam=3.8ms preview=8.4ms hands=13.0ms | cpu=159% (of one core)
+19:19:56 INFO    incanto: hands worker: 29.8 Hz, inference 13.0 ms, result age 49.8 ms (at main-loop use)
+19:19:56 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:01 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.0ms grab=22.3ms wait_frame=22.9ms downscale=0.2ms hands_age=46.8ms segment=3.4ms vcam=3.2ms preview=6.9ms hands=12.8ms | cpu=119% (of one core)
+19:20:01 INFO    incanto: hands worker: 30.0 Hz, inference 12.8 ms, result age 46.8 ms (at main-loop use)
+19:20:01 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:06 INFO    incanto: FPS 30.2 (avg over 5.0s) | camera delivers 30.2 fps | retrieve=11.0ms grab=22.1ms wait_frame=22.7ms downscale=0.2ms hands_age=45.3ms segment=3.4ms vcam=3.2ms preview=6.7ms hands=12.3ms | cpu=140% (of one core)
+19:20:06 INFO    incanto: hands worker: 30.2 Hz, inference 12.3 ms, result age 45.3 ms (at main-loop use)
+19:20:06 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:11 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 29.9 fps | retrieve=10.9ms grab=22.5ms wait_frame=23.1ms downscale=0.2ms hands_age=46.7ms segment=3.3ms vcam=3.1ms preview=6.9ms hands=12.0ms | cpu=126% (of one core)
+19:20:11 INFO    incanto: hands worker: 29.9 Hz, inference 12.0 ms, result age 46.7 ms (at main-loop use)
+19:20:11 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:16 INFO    incanto: FPS 30.1 (avg over 5.0s) | camera delivers 30.1 fps | retrieve=10.8ms grab=22.5ms wait_frame=22.9ms downscale=0.2ms hands_age=44.7ms segment=3.4ms vcam=3.2ms preview=6.4ms hands=11.9ms | cpu=148% (of one core)
+19:20:16 INFO    incanto: hands worker: 30.1 Hz, inference 11.9 ms, result age 44.7 ms (at main-loop use)
+19:20:16 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:21 INFO    incanto: FPS 30.1 (avg over 5.0s) | camera delivers 30.1 fps | grab=22.1ms retrieve=11.1ms wait_frame=22.2ms downscale=0.2ms hands_age=45.7ms segment=3.6ms vcam=3.2ms preview=7.5ms hands=12.8ms | cpu=139% (of one core)
+19:20:21 INFO    incanto: hands worker: 30.3 Hz, inference 12.8 ms, result age 45.7 ms (at main-loop use)
+19:20:21 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:26 INFO    incanto: FPS 29.9 (avg over 5.1s) | camera delivers 29.9 fps | grab=22.0ms retrieve=11.3ms wait_frame=22.2ms downscale=0.2ms hands_age=43.8ms segment=3.7ms vcam=3.4ms preview=7.6ms hands=12.8ms | cpu=140% (of one core)
+19:20:26 INFO    incanto: hands worker: 29.7 Hz, inference 12.8 ms, result age 43.8 ms (at main-loop use)
+19:20:26 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:31 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 29.9 fps | retrieve=11.2ms grab=22.2ms wait_frame=22.2ms downscale=0.2ms hands_age=44.2ms segment=3.8ms vcam=3.3ms preview=7.2ms hands=12.9ms | cpu=124% (of one core)
+19:20:31 INFO    incanto: hands worker: 29.9 Hz, inference 12.9 ms, result age 44.2 ms (at main-loop use)
+19:20:31 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:36 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 29.9 fps | retrieve=11.2ms grab=22.1ms wait_frame=22.2ms downscale=0.2ms hands_age=42.9ms segment=3.7ms vcam=3.3ms preview=7.4ms hands=12.9ms | cpu=134% (of one core)
+19:20:36 INFO    incanto: hands worker: 29.9 Hz, inference 12.9 ms, result age 42.9 ms (at main-loop use)
+19:20:36 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:41 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=10.8ms grab=22.4ms wait_frame=22.9ms downscale=0.2ms hands_age=46.3ms segment=3.3ms vcam=3.2ms preview=6.9ms hands=12.2ms | cpu=123% (of one core)
+19:20:41 INFO    incanto: hands worker: 30.0 Hz, inference 12.2 ms, result age 46.3 ms (at main-loop use)
+19:20:41 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:46 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.0ms grab=22.4ms wait_frame=22.8ms downscale=0.2ms hands_age=47.1ms segment=3.5ms vcam=3.4ms preview=6.3ms hands=12.4ms | cpu=121% (of one core)
+19:20:46 INFO    incanto: hands worker: 30.0 Hz, inference 12.4 ms, result age 47.1 ms (at main-loop use)
+19:20:46 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:51 INFO    incanto: FPS 30.2 (avg over 5.0s) | camera delivers 30.2 fps | retrieve=11.1ms grab=22.0ms wait_frame=22.3ms downscale=0.2ms hands_age=47.2ms segment=3.6ms vcam=3.5ms preview=6.7ms hands=12.9ms | cpu=147% (of one core)
+19:20:51 INFO    incanto: hands worker: 30.2 Hz, inference 12.9 ms, result age 47.2 ms (at main-loop use)
+19:20:51 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:20:56 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.0ms grab=22.3ms wait_frame=22.2ms downscale=0.2ms hands_age=45.9ms segment=3.6ms vcam=3.6ms preview=6.9ms hands=12.6ms | cpu=142% (of one core)
+19:20:56 INFO    incanto: hands worker: 30.0 Hz, inference 12.6 ms, result age 45.9 ms (at main-loop use)
+19:20:56 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+19:21:01 INFO    incanto: Reached --seconds limit.
+19:21:01 INFO    incanto: Summary: 3601 frames in 120.0s = 30.0 FPS average
+19:21:02 INFO    incanto: Shut down cleanly.

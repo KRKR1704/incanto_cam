@@ -8,6 +8,11 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
+EXPOSURE_MIN, EXPOSURE_MAX = -13.0, 0.0
+# Exposure is log2(seconds) on this backend: -5 = 31 ms, about one 30 fps frame period. Longer than
+# that and the camera must lower its frame rate (measured: auto exposure in a dim room -> 15 fps).
+EXPOSURE_FPS_LIMIT = -5.0
+
 
 class CameraError(RuntimeError):
     """Raised when the webcam cannot be opened or read."""
@@ -17,6 +22,7 @@ class Camera:
     def __init__(self, width: int, height: int, fps: int, index: int = 0,
                  backends: tuple[int, ...] = (cv2.CAP_MSMF, cv2.CAP_DSHOW)):
         self.index = index
+        self._manual_exposure = False  # True once we have switched the driver to manual exposure
         # Media Foundation first: on the dev laptop DirectShow was capped at ~5 fps at 720p
         # (it ignores the MJPG request), while MSMF delivers the full 30 fps.
         self._cap = None
@@ -68,26 +74,64 @@ class Camera:
         return bool(self._cap.set(cv2.CAP_PROP_SETTINGS, 1))
 
     def exposure_state(self) -> dict[str, float]:
-        """Current exposure-related properties as reported by the backend."""
+        """Properties as the backend reports them. NOTE: MSMF's exposure/auto-exposure readback is
+        stale (always the same value no matter what was set), so never use it to verify a change."""
         return {
             "exposure": self._cap.get(cv2.CAP_PROP_EXPOSURE),
             "auto_exposure": self._cap.get(cv2.CAP_PROP_AUTO_EXPOSURE),
             "fps": self._cap.get(cv2.CAP_PROP_FPS),
         }
 
-    def lock_exposure(self, value: float) -> bool:
-        """Disable auto-exposure and set a fixed exposure. Returns True if it read back as set."""
-        before = self.exposure_state()
-        # 0.25 is the OpenCV convention for "manual"; some backends use 0 or 1.
-        auto_ret = self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
-        exp_ret = self._cap.set(cv2.CAP_PROP_EXPOSURE, value)
-        after = self.exposure_state()
-        accepted = bool(exp_ret) and abs(after["exposure"] - value) < 1e-6
-        log.info("lock-exposure: requested exposure=%s | before=%s | set(auto=0.25)->%s set(exposure)->%s | after=%s | ACCEPTED=%s",
-                 value, before, auto_ret, exp_ret, after, accepted)
+    def mean_brightness(self, frames: int = 8) -> float:
+        """Mean pixel value (0-255) of a frame after reading `frames` frames (lets exposure settle)."""
+        frame = None
+        for _ in range(frames):
+            frame = self.read()
+        return float(frame.mean())
+
+    def set_exposure(self, value: float) -> bool:
+        """Switch to manual exposure at `value` (log2 seconds). True if the driver accepted both writes."""
+        value = float(min(EXPOSURE_MAX, max(EXPOSURE_MIN, value)))
+        self._manual_exposure = True
+        auto_ok = self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # 0.25 = manual (verified on this camera)
+        exp_ok = self._cap.set(cv2.CAP_PROP_EXPOSURE, value)
+        if value > EXPOSURE_FPS_LIMIT:
+            log.warning("exposure %.0f is longer than one 30 fps frame period; the camera may drop below 30 fps",
+                        value)
+        return bool(auto_ok and exp_ok)
+
+    def set_auto_exposure(self) -> bool:
+        """Hand exposure back to the camera. The driver REMEMBERS manual exposure across processes, so
+        this must be done explicitly (0.75 = auto; verified: it restores normal brightness)."""
+        self._manual_exposure = False
+        return bool(self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75))
+
+    def apply_auto_exposure(self) -> bool:
+        """set_auto_exposure + a before/after brightness check, for use at camera open."""
+        import time
+        before = self.mean_brightness()
+        ok = self.set_auto_exposure()
+        time.sleep(0.6)
+        after = self.mean_brightness(10)
+        log.info("exposure: requested auto | set() accepted=%s | mean brightness %.0f -> %.0f", ok, before, after)
+        return ok
+
+    def apply_exposure(self, value: float) -> bool:
+        """set_exposure + a before/after brightness check, for use at camera open (single-threaded)."""
+        before = self.mean_brightness()
+        accepted = self.set_exposure(value)
+        import time
+        time.sleep(0.6)  # let the sensor settle
+        after = self.mean_brightness(10)
+        log.info("exposure: requested manual %.0f | set() accepted=%s | mean brightness %.0f -> %.0f "
+                 "(MSMF readback is unreliable, so brightness is the check)", value, accepted, before, after)
         return accepted
 
     def release(self) -> None:
+        if self._manual_exposure:
+            # Don't leave the driver stuck on a manual exposure for the next app (e.g. Meet using the webcam).
+            self.set_auto_exposure()
+            log.info("Restored auto exposure on the camera.")
         self._cap.release()
 
 
@@ -110,6 +154,7 @@ class ThreadedCamera:
         self._frame: np.ndarray | None = None
         self._seq = 0
         self._last_seq = 0
+        self._pending_exposure: float | None = None
         self._frame_time = 0.0
         self.frame_time = 0.0  # perf_counter() when the frame last returned by read() arrived
         self._error: Exception | None = None
@@ -123,6 +168,10 @@ class ThreadedCamera:
         import time
         try:
             while not self._stop:
+                pending, self._pending_exposure = self._pending_exposure, None
+                if pending is not None:  # apply between reads: VideoCapture is not thread-safe
+                    ok = self._cam.set_exposure(pending)
+                    log.info("exposure set to %.0f (accepted=%s)", pending, ok)
                 frame = self._cam.read(self.timer)
                 with self._cond:
                     self._frame = frame
@@ -168,8 +217,9 @@ class ThreadedCamera:
     def exposure_state(self) -> dict[str, float]:
         return self._cam.exposure_state()
 
-    def lock_exposure(self, value: float) -> bool:
-        return self._cam.lock_exposure(value)
+    def request_exposure(self, value: float) -> None:
+        """Ask the capture thread to switch to manual exposure `value` before its next read."""
+        self._pending_exposure = value
 
     def release(self) -> None:
         self._stop = True

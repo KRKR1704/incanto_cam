@@ -56,6 +56,11 @@ class PreviewConfig:
 
 
 @dataclass(frozen=True)
+class CameraConfig:
+    exposure: float | None = None  # None = auto; else manual exposure in log2 seconds (e.g. -6 = 1/64 s)
+
+
+@dataclass(frozen=True)
 class VCamConfig:
     backend: str = "obs"
 
@@ -69,6 +74,7 @@ class TriggersConfig:
 @dataclass(frozen=True)
 class Config:
     video: VideoConfig = field(default_factory=VideoConfig)
+    camera: CameraConfig = field(default_factory=CameraConfig)
     vcam: VCamConfig = field(default_factory=VCamConfig)
     models: ModelsConfig = field(default_factory=ModelsConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
@@ -104,6 +110,20 @@ def _build(cls, name: str, values: dict):
     return cls(**values)
 
 
+def _parse_camera(values: dict) -> CameraConfig:
+    unknown = set(values) - {"exposure"}
+    if unknown:
+        raise ConfigError(f"unknown key(s) in 'camera': {', '.join(sorted(unknown))}")
+    exposure = values.get("exposure", "auto")
+    if exposure == "auto" or exposure is None:
+        return CameraConfig(None)
+    if isinstance(exposure, bool) or not isinstance(exposure, (int, float)):
+        raise ConfigError(f"camera.exposure must be \"auto\" or a number (e.g. -6), got {exposure!r}")
+    if not -13 <= exposure <= 0:
+        raise ConfigError("camera.exposure must be between -13 and 0 (log2 seconds)")
+    return CameraConfig(float(exposure))
+
+
 def load_config(path: str | Path | None = None) -> Config:
     path = Path(path) if path else DEFAULT_CONFIG_PATH
     try:
@@ -119,6 +139,7 @@ def load_config(path: str | Path | None = None) -> Config:
 
     video = _build(VideoConfig, "video", _section(raw, "video"))
     vcam = _build(VCamConfig, "vcam", _section(raw, "vcam"))
+    camera = _parse_camera(_section(raw, "camera"))
     triggers = _build(TriggersConfig, "triggers", _section(raw, "triggers"))
     models = _build(ModelsConfig, "models", _section(raw, "models"))
     perception = _build(PerceptionConfig, "perception", _section(raw, "perception"))
@@ -164,6 +185,7 @@ def load_config(path: str | Path | None = None) -> Config:
 
     return Config(
         video=video,
+        camera=camera,
         vcam=vcam,
         models=models,
         perception=perception,

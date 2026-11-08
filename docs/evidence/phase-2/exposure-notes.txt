@@ -1,0 +1,31 @@
+Camera exposure investigation (Phase 2 follow-up)
+
+1. Requested files docs/evidence/phase-1/ab-unlocked.txt and ab-locked.txt DO NOT EXIST.
+   Closest existing logs (share of 5 s intervals with camera/loop below 20 fps):
+     diag-solo.txt          auto   60 s   9/11 (82%)  avg 16.4 FPS   (a game was running)
+     diag-throttle-off.txt  auto  120 s   8/23 (35%)  avg 22.4 FPS
+     diag-throttle-on.txt   auto  120 s  16/23 (70%)  avg 19.1 FPS
+     diag-locked.txt        -6    120 s   0/23  (0%)  avg 27.2 FPS
+   Caveats: one locked run vs three auto runs, different times/lighting; and the old lock check
+   ("ACCEPTED") compared against a stale driver readback, so it proved nothing (see 2).
+
+2. Findings about this camera / MSMF (measured with mean image brightness):
+   - Exposure get() is stale: always returns -6.0 / auto 0.0 whatever was set. Never verify with it.
+   - set() works: manual exposure -2/-5/-8/-11 gave brightness 133/92/6/0; auto gave ~110-135.
+   - AUTO_EXPOSURE 0.25 = manual; 0.75 (also 0.0/1.0) = auto, which restores normal brightness.
+   - The driver REMEMBERS manual exposure across processes. A leftover manual -11 left the camera black
+     (an earlier "auto" run was invalid because of it). Fixes: "auto" now explicitly writes auto at open,
+     and a manual session restores auto at shutdown.
+   - Exposure is log2(seconds): -5 = 31 ms ~ one 30 fps frame period; longer forces fps down. This explains
+     the 15 fps phases (auto picks long exposures in dim light) and why a short manual exposure avoids them.
+
+3. Fresh same-session A/B (120 s each, preview on, same room/lighting):
+     run-log-exposure.txt        camera.exposure: auto  30.0 FPS avg, camera 29.8-30 in all 23 intervals, slow phase: none
+     ab-exposure-manual-6.txt    manual -6              27.7 FPS avg, camera 23-30, below 24 in 1 interval (5 s),
+                                 image much darker (brightness 103 -> 42)
+   Today's lighting never triggered the 15 fps phase with auto, so manual -6 was not steadier here.
+
+4. Decision: default stays "auto". Manual exposure is available as camera.exposure: -6 in config.yaml (or
+   --lock-exposure -6) for dim rooms, with [ and ] nudging by 1 at runtime. Nudging above -5 logs a warning
+   (longer than one frame period). Verified the nudge path thread-safely changes brightness in a ThreadedCamera:
+   auto 113; -3 109; -6 42; -8 2; -5 72; and releasing the camera restores auto (113).

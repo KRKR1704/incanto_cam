@@ -12,7 +12,7 @@ import cv2
 import psutil
 
 from incanto.config import ConfigError, load_config
-from incanto.io.camera import Camera, CameraError, ThreadedCamera
+from incanto.io.camera import EXPOSURE_MAX, EXPOSURE_MIN, Camera, CameraError, ThreadedCamera
 from incanto.io.vcam import VCamError, VirtualCamera
 from incanto.perception.hands import HandsWorker, HandTracker
 from incanto.perception.segmenter import Segmenter
@@ -97,13 +97,17 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                                  "  Run: python scripts/download_models.py")
 
         raw_cam = Camera(cfg.video.width, cfg.video.height, cfg.video.fps)
+        # --lock-exposure overrides camera.exposure from config.yaml. Applied before the capture thread starts.
+        exposure = lock_exposure if lock_exposure is not None else cfg.camera.exposure
+        if exposure is not None:
+            raw_cam.apply_exposure(exposure)
+        else:
+            raw_cam.apply_auto_exposure()  # explicit: the driver keeps a previous manual setting
         threaded = cfg.video.capture_mode == "threaded"
         cam = ThreadedCamera(raw_cam) if threaded else raw_cam
         # Output size follows the real camera resolution so frames are always sent unchanged.
         out_size = (cam.width, cam.height)
         vcam = VirtualCamera(cam.width, cam.height, cfg.video.fps, cfg.vcam.backend)
-        if lock_exposure is not None:
-            cam.lock_exposure(lock_exposure)
         log.info("Capture mode: %s", cfg.video.capture_mode)
 
         p = cfg.perception
@@ -181,6 +185,16 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 if key in (ord("q"), ord("Q")):
                     log.info("Quit requested.")
                     break
+                if key in (ord("["), ord("]")):
+                    if exposure is None:
+                        log.info("Exposure is auto; set camera.exposure or --lock-exposure to use [ and ]")
+                    else:
+                        exposure = min(EXPOSURE_MAX, max(EXPOSURE_MIN, exposure + (1 if key == ord("]") else -1)))
+                        log.info("Exposure nudged to %.0f", exposure)
+                        if threaded:
+                            cam.request_exposure(exposure)
+                        else:
+                            cam.set_exposure(exposure)
                 if key in (ord("d"), ord("D")):
                     hud_on = not hud_on
                     log.info("Debug HUD %s", "on" if hud_on else "off")
@@ -213,7 +227,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 if p.hands_async:
                     log.info("hands worker: %.1f Hz, inference %.1f ms, result age %.1f ms (at main-loop use)",
                              hands_hz, hands_ms, averages.get("hands_age", 0.0))
-                log.info("camera props: %s | power=%s", cam.exposure_state(), winperf.power_source())
+                log.info("camera: exposure=%s (our setting; driver readback is unreliable) | power=%s",
+                         "auto" if exposure is None else f"{exposure:.0f} manual", winperf.power_source())
                 timer.reset()
                 last_log, frames_since_log = now, 0
             if max_seconds is not None and now - start >= max_seconds:
