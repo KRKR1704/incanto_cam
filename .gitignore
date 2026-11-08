@@ -1,16 +1,50 @@
 .venv/
-recordings/
 __pycache__/
 dist/
 build/
 *.spec
 models/
 
-# Privacy: evidence images/media stay local (text logs are tracked)
+# --- Privacy: the repo is PUBLIC. No image/video/audio/array file may be committed. ---
+# Local-only dirs (screenshots, clips, camera frames, clean plates)
+recordings/
+plates/
 docs/evidence/**/*.png
 docs/evidence/**/*.jpg
+docs/evidence/**/*.jpeg
+docs/evidence/**/*.gif
 docs/evidence/**/*.mp4
+docs/evidence/**/*.avi
+docs/evidence/**/*.mov
+docs/evidence/**/*.webm
 docs/evidence/**/*.wav
+docs/evidence/**/*.mp3
+docs/evidence/**/*.npy
+docs/evidence/**/*.npz
+# tests/fixtures: only labels.yaml (and .gitkeep) is committed
+tests/fixtures/*
+!tests/fixtures/labels.yaml
+!tests/fixtures/.gitkeep
+
+# Media types, anywhere in the repo
+*.png
 *.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
 *.mp4
+*.avi
+*.mov
+*.webm
+*.mkv
 *.wav
+*.mp3
+*.flac
+*.ogg
+*.npy
+*.npz
+
+# Exceptions: stock files added by hand (not of the user)
+!assets/backdrops/**
+!assets/sounds/**

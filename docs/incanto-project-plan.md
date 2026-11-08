@@ -196,11 +196,12 @@ code/
 ├── assets/
 │   ├── backdrops/                  # images for backdrop_swap
 │   └── sounds/                     # optional local sound cues
-├── recordings/                     # saved clips for tuning (gitignored)
+├── recordings/                     # saved clips for tuning (gitignored, LOCAL-ONLY)
+├── plates/                         # saved clean plates, photos of the room (gitignored, LOCAL-ONLY)
 ├── tests/
 │   ├── test_gestures_replay.py     # runs detectors against recorded clips
 │   ├── test_particles.py
-│   └── fixtures/                   # small labeled clips
+│   └── fixtures/                   # only labels.yaml is committed; clips of the user are LOCAL-ONLY (gitignored)
 ├── config.yaml
 ├── requirements.txt
 ├── README.md
@@ -288,6 +289,8 @@ spells:
 
 Each phase ends with a **real-run checkpoint**: something you can see on camera or in Meet, with evidence (a screenshot, a short recording, or a log). Don't move on until the checkpoint passes.
 
+> **Privacy: the GitHub repo is public.** Screenshots, recordings, clips, mic audio, camera frames and clean plates are **LOCAL-ONLY evidence**: they live in `docs/evidence/`, `recordings/` and `plates/` but are gitignored (and blocked by a pre-commit hook). Only `.txt` logs and reports are committed. Wherever a checkpoint below says "screenshot" or "recording", it stays on this machine.
+
 ### Phase 0: Setup (≈30 min)
 - Install Python 3.10+, OBS Studio (default options), create a venv.
 - `pip install opencv-contrib-python mediapipe pyvirtualcam sounddevice numpy pyyaml` (MediaPipe depends on `opencv-contrib-python`; do not also install `opencv-python`)
@@ -310,7 +313,7 @@ Each phase ends with a **real-run checkpoint**: something you can see on camera 
 **Checkpoint:** A short recording of the preview showing the mask following you cleanly and both hands tracked, with FPS still ≥ 24. The Meet feed must show **no** debug overlay.
 
 ### Phase 3: Clean plate (1 hr)
-- Hotkey `B`: 3-second countdown → step out → average ~30 frames → save the plate.
+- Hotkey `B`: 3-second countdown → step out → average ~30 frames → save the plate to `plates/` (local-only, it is a photo of the room).
 - Debug hotkey `V`: show the plate wherever the mask is (instant vanish, no effect).
 
 **Checkpoint:** Toggling `V` makes you disappear with no visible hole or ghosting. Before/after screenshots.
@@ -318,7 +321,7 @@ Each phase ends with a **real-run checkpoint**: something you can see on camera 
 ### Phase 4: Record & replay (1–2 hrs)
 - `io/recorder.py`: hotkey `R` saves synced video + audio clips to `recordings/`.
 - Replay mode: `python -m incanto --replay recordings/clip.mp4` runs the full pipeline on a saved clip instead of the webcam.
-- Record a labeled set: 10 snaps, 10 claps, 10 thumbs-ups, and 2 minutes of normal talking with hand movement.
+- Record a labeled set: 10 snaps, 10 claps, 10 thumbs-ups, and 2 minutes of normal talking with hand movement. These clips of the user stay **local-only**; only `tests/fixtures/labels.yaml` is committed. Replay tests `pytest.skip` with a clear message when the clips are missing, so a fresh clone still passes.
 
 **Checkpoint:** Replay of a recorded clip produces the same perception output as live.
 
@@ -356,7 +359,7 @@ Each phase ends with a **real-run checkpoint**: something you can see on camera 
 - Small tray/HUD indicator (preview only) showing the active spell and cooldown.
 - Hotkeys: `B` plate, `R` record, `C` cancel spell, `Q` quit.
 - Graceful handling: no camera, no OBS driver, mic unavailable.
-- README with setup steps and a demo GIF.
+- README with setup steps (no demo GIF/video of the user in the repo; host any demo outside GitHub or use non-personal footage).
 - PyInstaller build → `Incanto.exe`.
 
 **Checkpoint:** On a fresh run of the `.exe`, a Meet call works end to end.
@@ -383,10 +386,10 @@ If over budget: run segmentation every 2nd frame, lower `perception_width`, or v
 
 ## 9. Testing Strategy
 
-- **Replay tests** (main tool): labeled clips in `tests/fixtures/` run through gesture detectors, reporting precision/recall per gesture. This lets detection be tuned without performing gestures live.
+- **Replay tests** (main tool): labeled clips (local-only; labels in `tests/fixtures/labels.yaml`) run through gesture detectors, reporting precision/recall per gesture. This lets detection be tuned without performing gestures live.
 - **Unit tests:** particle math, trigger cooldown logic, config validation.
 - **Rendered output review:** spells can render onto a recorded clip and save an `.mp4` for visual review.
-- **Real-run evidence:** each phase checkpoint needs a recording or screenshot from an actual run (ideally inside Meet). Passing tests alone don't close a phase.
+- **Real-run evidence:** each phase checkpoint needs a recording or screenshot from an actual run (ideally inside Meet), kept local-only, plus a committed `.txt` log. Passing tests alone don't close a phase.
 
 ---
 
@@ -418,6 +421,6 @@ If over budget: run segmentation every 2nd frame, lower `perception_width`, or v
 
 - Branch per phase: `phase-1-camera`, `phase-2-perception`, …
 - Commits and PRs: plain, descriptive messages with no AI co-author trailers or attribution lines.
-- `recordings/` and large media are gitignored. Only small labeled fixtures go in `tests/fixtures/`.
-- Every new spell ships with a short demo clip in its PR description.
+- No image, video, audio or camera-frame file of the user is ever committed, on any branch (the repo is public). `.gitignore` and the `scripts/hooks/pre-commit` hook enforce it; only stock files in `assets/` are exempt. `tests/fixtures/` holds only `labels.yaml`.
+- Spells are described in text in the PR; do not upload demo clips of the user to GitHub (PR attachments are public too).
 - Task-level progress is tracked in `docs/incanto-build-tasks.md`.

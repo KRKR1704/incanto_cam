@@ -1,0 +1,17 @@
+#!/bin/sh
+# Incanto pre-commit hook: the repo is public, so refuse any image/video/audio/array file
+# outside assets/ (assets/backdrops and assets/sounds hold stock files only).
+# Install with: python scripts/install_hooks.py
+
+bad=$(git diff --cached --name-only --diff-filter=ACMR \
+    | grep -iE '\.(png|jpe?g|gif|bmp|webp|tiff?|heic|mp4|avi|mov|webm|mkv|wav|mp3|flac|ogg|m4a|npy|npz)$' \
+    | grep -v '^assets/')
+
+if [ -n "$bad" ]; then
+    echo "pre-commit: REFUSED. Image/video/audio/array files must never be committed" >&2
+    echo "(this repo is public; screenshots, recordings and plates are local-only):" >&2
+    echo "$bad" | sed 's/^/    /' >&2
+    echo "Unstage them with: git restore --staged <file>" >&2
+    exit 1
+fi
+exit 0

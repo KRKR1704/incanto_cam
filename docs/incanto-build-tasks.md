@@ -6,6 +6,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 - Work top to bottom. A task's **Depends on** column lists what must be done first.
 - Tick `[x]` when a task is done.
 - A phase is only complete when its **Phase gate** passes on a real run, with the evidence saved (screenshot, recording, or log) in `docs/evidence/phase-N/`.
+- **Privacy: the GitHub repo is public.** Screenshots, recordings, clips, mic audio, camera frames and clean plates are **LOCAL-ONLY evidence**: keep them in `docs/evidence/` (or `recordings/`, `plates/`) but they are gitignored and a pre-commit hook (`scripts/install_hooks.py`) refuses to commit them. Only `.txt` logs and reports get committed. Wherever a gate below says "screenshot" or "recording", that file stays on this machine.
 - Estimates are rough, for one person.
 
 **Status legend:** `[ ]` todo · `[~]` in progress · `[x]` done · `[!]` blocked
@@ -38,7 +39,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 0.3 | Create the `code/` root folder, run `git init`, create a venv at `code/.venv` | 0.1 | 5m | [x] |
 | 0.4 | Create `requirements.txt` (opencv-contrib-python, mediapipe, pyvirtualcam, sounddevice, numpy, pyyaml, pytest) and install | 0.3 | 5m | [x] |
 | 0.5 | Scaffold the full folder structure from §4, with empty `__init__.py` files and stub modules | 0.3 | 10m | [x] |
-| 0.6 | Add `config.yaml` from §6 and `.gitignore` (`.venv/`, `recordings/`, `__pycache__/`, `dist/`, `build/`) | 0.5 | 5m | [x] |
+| 0.6 | Add `config.yaml` from §6 and `.gitignore` (`.venv/`, `recordings/`, `plates/`, `__pycache__/`, `dist/`, `build/`, and all image/video/audio/array files; see Privacy) | 0.5 | 5m | [x] |
 | 0.7 | Add a minimal `README.md` (what it is, setup steps) and make the first commit | 0.6 | 5m | [x] |
 
 **Phase gate:** `python -c "import cv2, mediapipe, pyvirtualcam, sounddevice, yaml"` runs with no errors.
@@ -57,7 +58,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 1.6 | `utils/logging.py`: console logging with levels; log FPS every 5 seconds | 1.5 | 5m | [x] |
 | 1.7 | Run it and verify in Google Meet | 1.5 | 10m | [x] |
 
-**Phase gate:** "OBS Virtual Camera" selected in Meet shows the live feed with no FPS overlay in it, and the logs show FPS ≥ 24. Save a Meet screenshot + log excerpt.
+**Phase gate:** "OBS Virtual Camera" selected in Meet shows the live feed with no FPS overlay in it, and the logs show FPS ≥ 24. Save a Meet screenshot (local-only) + log excerpt (committed).
 
 ---
 
@@ -75,7 +76,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 2.7 | Add per-stage timing (hands, segmentation) to the FPS log | 1.4, 2.5 | 10m | [x] |
 | 2.8 | If FPS < 24: segmentation every 2nd frame, reusing the last mask (config flag) | 2.7 | 15m | [x] |
 
-**Phase gate:** A preview recording shows the mask following you cleanly and both hands tracked, at FPS ≥ 24. The Meet feed shows no debug overlay.
+**Phase gate:** A preview recording shows the mask following you cleanly and both hands tracked, at FPS ≥ 24. The Meet feed shows no debug overlay. Screenshots/recordings are local-only; commit the `.txt` run log.
 
 ---
 
@@ -86,11 +87,11 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 3.1 | `plate/clean_plate.py`: capture N frames (default 30) and average them into a plate | 1.5 | 15m | [ ] |
 | 3.2 | Hotkey `B`: 3-second on-screen countdown in the preview, then capture | 3.1 | 10m | [ ] |
 | 3.3 | Check during capture: warn if the segmenter still sees a person in the frame | 2.2, 3.1 | 10m | [ ] |
-| 3.4 | Save/load the plate to disk so it survives restarts (invalidated if the resolution changes) | 3.1 | 10m | [ ] |
+| 3.4 | Save/load the plate to `plates/` (gitignored, local-only: it is a photo of the room) so it survives restarts (invalidated if the resolution changes) | 3.1 | 10m | [ ] |
 | 3.5 | `render/compositor.py`: `composite(frame, mask, plate)` replaces masked pixels with plate pixels | 2.4, 3.1 | 10m | [ ] |
 | 3.6 | Debug hotkey `V`: toggle instant vanish using the compositor | 3.5 | 5m | [ ] |
 
-**Phase gate:** Pressing `V` makes you disappear with no visible hole or ghosting, live in Meet. Save before/after screenshots.
+**Phase gate:** Pressing `V` makes you disappear with no visible hole or ghosting, live in Meet. Save before/after screenshots (local-only).
 
 ---
 
@@ -99,14 +100,14 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | ID | Task | Depends on | Est. | Done |
 |---|---|---|---|---|
 | 4.1 | `io/audio.py`: mic stream thread (sounddevice, ~20 ms blocks) into a thread-safe ring buffer with timestamps | 1.5 | 20m | [ ] |
-| 4.2 | `io/recorder.py`: hotkey `R` starts/stops recording raw frames to `.mp4` + mic to `.wav`, with a shared start timestamp | 4.1 | 25m | [ ] |
+| 4.2 | `io/recorder.py`: hotkey `R` starts/stops recording raw frames to `.mp4` + mic to `.wav` in `recordings/` (gitignored, local-only), with a shared start timestamp | 4.1 | 25m | [ ] |
 | 4.3 | Recorder runs on its own thread so recording never drops main-loop FPS | 4.2 | 10m | [ ] |
 | 4.4 | Replay source: `python -m incanto --replay <clip>` feeds video + audio through the pipeline in sync instead of webcam/mic | 4.2 | 25m | [ ] |
 | 4.5 | `--render-out <file>` option: save the composited output of a replay to `.mp4` for review | 4.4 | 10m | [ ] |
-| 4.6 | Record the labeled fixture set: 10 snaps, 10 claps, 10 thumbs-ups, 2 min of talking with hand movement | 4.2 | 15m | [ ] |
-| 4.7 | Label file `tests/fixtures/labels.yaml`: clip → list of (gesture, timestamp) | 4.6 | 15m | [ ] |
+| 4.6 | Record the labeled fixture set: 10 snaps, 10 claps, 10 thumbs-ups, 2 min of talking with hand movement. Clips of the user stay **local-only** (`recordings/` or `tests/fixtures/`, both gitignored); they are never committed | 4.2 | 15m | [ ] |
+| 4.7 | Label file `tests/fixtures/labels.yaml`: clip → list of (gesture, timestamp). This is the **only** file under `tests/fixtures/` that is committed | 4.6 | 15m | [ ] |
 
-**Phase gate:** Replaying a recorded clip produces the same perception output (mask + hands) as live, and the audio stays in sync.
+**Phase gate:** Replaying a recorded clip produces the same perception output (mask + hands) as live, and the audio stays in sync. Clips are local-only; commit only the comparison log/report.
 
 ---
 
@@ -122,13 +123,13 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 5.6 | `gestures/engine.py`: run all detectors each frame, collect events | 5.3–5.5 | 15m | [ ] |
 | 5.7 | `triggers/manager.py`: confidence threshold, global cooldown, per-gesture debounce, gesture → spell mapping from config | 5.6 | 25m | [ ] |
 | 5.8 | HUD: show the detected gesture name + confidence + cooldown bar (preview only) | 2.6, 5.7 | 10m | [ ] |
-| 5.9 | `tests/test_gestures_replay.py`: run detectors on fixtures, compare to labels, print precision/recall per gesture | 4.7, 5.6 | 30m | [ ] |
+| 5.9 | `tests/test_gestures_replay.py`: run detectors on the local clips, compare to `labels.yaml`, print precision/recall per gesture. Must `pytest.skip` with a clear message when the local clips are missing, so a fresh clone still passes | 4.7, 5.6 | 30m | [ ] |
 | 5.10 | Tune thresholds in `config.yaml` until the replay targets pass | 5.9 | 30m | [ ] |
 | 5.11 | Unit tests for trigger cooldown + debounce logic | 5.7 | 15m | [ ] |
 
 **Phase gate:**
-- Replay report: ≥ 9/10 detected per gesture, **0** false triggers on the talking clip. Save the report output.
-- Live: 10 real snaps, ≥ 9 trigger, with the gesture name shown on the preview HUD. Save the recording.
+- Replay report: ≥ 9/10 detected per gesture, **0** false triggers on the talking clip. Save the report output (`.txt`, committed).
+- Live: 10 real snaps, ≥ 9 trigger, with the gesture name shown on the preview HUD. Save the recording (local-only).
 
 ---
 
@@ -148,7 +149,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 6.10 | Render the effect on a replay clip with `--render-out`, review, and tune particle size/speed/stagger | 4.5, 6.8 | 30m | [ ] |
 | 6.11 | Mask fingertip gaps: dilate the mask slightly and union it with a convex hull from the hand landmarks before vanish compositing (the 144x256 segmentation model misses thin fingertips; seen in Phase 2 screenshots) | 6.5, 2.5 | 30m | [ ] |
 
-**Phase gate:** A screen recording **inside a Meet call** of the full cycle: snap → dissolve → invisible while moving → snap → reassemble, with FPS ≥ 24 throughout (log excerpt).
+**Phase gate:** A screen recording **inside a Meet call** of the full cycle: snap → dissolve → invisible while moving → snap → reassemble, with FPS ≥ 24 throughout (log excerpt). The screen recording is local-only; commit only the log excerpt.
 
 ---
 
@@ -164,7 +165,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 7.6 | Write `spells/README.md`: how to add a new spell in one file + one config line | 7.5 | 20m | [ ] |
 | 7.7 | Confirm no core files changed when adding 7.1 and 7.3 (plugin design check) | 7.5 | 10m | [ ] |
 
-**Phase gate:** A screen recording in Meet showing each gesture firing its mapped spell.
+**Phase gate:** A screen recording in Meet showing each gesture firing its mapped spell (local-only; commit only a `.txt` log of the triggers).
 
 ---
 
@@ -178,12 +179,12 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 8.4 | Warn when no clean plate exists and a plate-dependent spell is triggered | 3.4, 6.3 | 10m | [ ] |
 | 8.5 | Exposure drift check: compare the plate to live background edges, prompt to recapture if they drift too far | 3.4 | 25m | [ ] |
 | 8.6 | Final FPS pass against the §8 budget; profile and fix the slowest stage | all | 30m | [ ] |
-| 8.7 | README: setup, OBS note, hotkeys, gesture → spell table, adding spells, demo GIF | 7.6 | 30m | [ ] |
+| 8.7 | README: setup, OBS note, hotkeys, gesture → spell table, adding spells. No demo GIF/video of the user in the repo (host it outside GitHub, or use non-personal footage) | 7.6 | 30m | [ ] |
 | 8.8 | PyInstaller build → `dist/Incanto.exe` with MediaPipe model files bundled | 8.6 | 30m | [ ] |
 | 8.9 | Test the `.exe` from a clean folder (no venv) | 8.8 | 15m | [ ] |
 | 8.10 | Tag `v1.0.0` and write release notes | 8.9 | 10m | [ ] |
 
-**Phase gate:** A fresh run of `Incanto.exe` → full Meet call with all three spells working. Save the recording.
+**Phase gate:** A fresh run of `Incanto.exe` → full Meet call with all three spells working. Save the recording (local-only).
 
 ---
 
@@ -214,4 +215,4 @@ Phases 3 and 4 can be done in either order after Phase 2. The particle system (6
 - [ ] ≥ 24 FPS at 720p during effects
 - [ ] 0 false triggers in the 2-minute talking replay
 - [ ] `Incanto.exe` runs on a clean machine with only OBS Studio installed
-- [ ] README with a demo GIF
+- [ ] README (no media of the user committed)
