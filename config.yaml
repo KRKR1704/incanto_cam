@@ -42,7 +42,11 @@ vanish:                        # the mask used when V replaces you with the plat
   plate_diff_open_px: 3        # morphological open on the difference mask (remove speckle)
   plate_diff_close_px: 9       # morphological close (fill holes)
   plate_diff_max_fraction: 0.5 # skip the difference mask if it covers more than this (lighting change)
-  plate_match: gain            # off | gain | gain_offset: match the plate's brightness/colour to live
+  near_me_px: 70               # plate difference only counts this far around the mask; moved objects
+                               # elsewhere stay live
+  plate_match: gain_map        # off | gain | gain_offset (one global correction) | gain_map (per-cell gain grid)
+  plate_match_cells_x: 8       # gain_map grid
+  plate_match_cells_y: 6
   plate_match_smoothing: 0.15  # weight of each frame's estimate in the running gain/offset
   match_margin_px: 30          # background used for matching lies this far outside the mask
 

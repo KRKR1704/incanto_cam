@@ -63,7 +63,7 @@ class CameraConfig:
 
 
 VANISH_MASK_MODES = ("seg_only", "seg_hands", "full")
-PLATE_MATCH_MODES = ("off", "gain", "gain_offset")
+PLATE_MATCH_MODES = ("off", "gain", "gain_offset", "gain_map")
 
 
 @dataclass(frozen=True)
@@ -79,7 +79,10 @@ class VanishConfig:
     plate_diff_open_px: int = 3          # morphological open: remove speckle
     plate_diff_close_px: int = 9         # morphological close: fill holes
     plate_diff_max_fraction: float = 0.5  # ignore the difference mask above this coverage (lighting change)
-    plate_match: str = "gain"            # off | gain | gain_offset: match the plate to the live brightness/colour
+    near_me_px: int = 70                 # the plate difference is only allowed this far around the mask
+    plate_match: str = "gain_map"        # off | gain | gain_offset | gain_map: match the plate to live brightness/colour
+    plate_match_cells_x: int = 8         # gain_map grid size
+    plate_match_cells_y: int = 6
     plate_match_smoothing: float = 0.15  # weight of each frame's estimate in the running gain/offset
     match_margin_px: int = 30            # background used for matching is this far outside the mask
 
@@ -228,9 +231,11 @@ def load_config(path: str | Path | None = None) -> Config:
     if vanish.plate_match not in PLATE_MATCH_MODES:
         raise ConfigError(f"vanish.plate_match must be one of {PLATE_MATCH_MODES}, got '{vanish.plate_match}'")
     for key in ("dilate_px", "hand_hull_dilate_px", "feather_px", "plate_diff_open_px",
-                "plate_diff_close_px", "match_margin_px", "plate_diff_threshold"):
+                "plate_diff_close_px", "match_margin_px", "plate_diff_threshold", "near_me_px"):
         if getattr(vanish, key) < 0:
             raise ConfigError(f"vanish.{key} must be >= 0")
+    if not (1 <= vanish.plate_match_cells_x <= 64 and 1 <= vanish.plate_match_cells_y <= 64):
+        raise ConfigError("vanish.plate_match_cells_x and plate_match_cells_y must be between 1 and 64")
     if not 0 < vanish.plate_match_smoothing <= 1:
         raise ConfigError("vanish.plate_match_smoothing must be in (0, 1]")
     if not 0 < vanish.plate_diff_max_fraction <= 1:
