@@ -16,6 +16,8 @@ Cast effects on your video calls with a gesture: a local, gesture-triggered vide
    pip install -r requirements.txt
    ```
 
+5. **Always run with the venv's Python**: `.venv\Scripts\python -m incanto` (and `.venv\Scripts\python -m pytest`). The system `python` lacks the dependencies and fails with `No module named 'cv2'`.
+
 See `docs/incanto-project-plan.md` and `docs/incanto-build-tasks.md` for the plan.
 
 **Status: Phase 0** (setup and scaffolding only; no functionality yet).

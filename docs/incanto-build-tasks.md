@@ -18,8 +18,8 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | Phase | Name | Tasks | Est. | Status |
 |---|---|---|---|---|
 | 0 | Setup | 7 | 0.5 h | ☑ |
-| 1 | Camera pipeline | 7 | 1.5 h | ☐ |
-| 2 | Perception | 9 | 2.5 h | ☐ |
+| 1 | Camera pipeline | 7 | 1.5 h | ☑ |
+| 2 | Perception | 9 | 2.5 h | ☑ |
 | 3 | Clean plate | 6 | 1 h | ☐ |
 | 4 | Record & replay | 7 | 1.5 h | ☐ |
 | 5 | Gesture engine | 11 | 4 h | ☐ |
@@ -42,7 +42,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 0.6 | Add `config.yaml` from §6 and `.gitignore` (`.venv/`, `recordings/`, `plates/`, `__pycache__/`, `dist/`, `build/`, and all image/video/audio/array files; see Privacy) | 0.5 | 5m | [x] |
 | 0.7 | Add a minimal `README.md` (what it is, setup steps) and make the first commit | 0.6 | 5m | [x] |
 
-**Phase gate:** `python -c "import cv2, mediapipe, pyvirtualcam, sounddevice, yaml"` runs with no errors.
+**Phase gate:** [x] `python -c "import cv2, mediapipe, pyvirtualcam, sounddevice, yaml"` runs with no errors.
 
 ---
 
@@ -58,7 +58,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 1.6 | `utils/logging.py`: console logging with levels; log FPS every 5 seconds | 1.5 | 5m | [x] |
 | 1.7 | Run it and verify in Google Meet | 1.5 | 10m | [x] |
 
-**Phase gate:** "OBS Virtual Camera" selected in Meet shows the live feed with no FPS overlay in it, and the logs show FPS ≥ 24. Save a Meet screenshot (local-only) + log excerpt (committed).
+**Phase gate:** [x] "OBS Virtual Camera" selected in Meet shows the live feed with no FPS overlay in it, and the logs show FPS ≥ 24. Save a Meet screenshot (local-only) + log excerpt (committed).
 
 ---
 
@@ -76,7 +76,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 2.7 | Add per-stage timing (hands, segmentation) to the FPS log | 1.4, 2.5 | 10m | [x] |
 | 2.8 | If FPS < 24: segmentation every 2nd frame, reusing the last mask (config flag) | 2.7 | 15m | [x] |
 
-**Phase gate:** A preview recording shows the mask following you cleanly and both hands tracked, at FPS ≥ 24. The Meet feed shows no debug overlay. Screenshots/recordings are local-only; commit the `.txt` run log.
+**Phase gate:** [x] A preview recording shows the mask following you cleanly and both hands tracked, at FPS ≥ 24. The Meet feed shows no debug overlay. Screenshots/recordings are local-only; commit the `.txt` run log.
 
 ---
 
