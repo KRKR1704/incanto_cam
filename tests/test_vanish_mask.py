@@ -6,7 +6,7 @@ import pytest
 
 from incanto.config import VanishConfig
 from incanto.perception.hands import Hand
-from incanto.render.vanish_mask import VanishMask
+from incanto.render.vanish_mask import VanishMask, fill_missing_cells
 
 W, H = 640, 360
 
@@ -31,6 +31,23 @@ def seg_covering(x0, x1):
     return seg
 
 
+def full_mask(r):
+    """Expand a VanishResult's ROI mask into a full-frame array (zeros outside the ROI)."""
+    out = np.zeros((H, W), np.float32)
+    if r.roi:
+        x0, y0, x1, y1 = r.roi
+        out[y0:y1, x0:x1] = r.mask
+    return out
+
+
+def full_plate(r, fallback):
+    out = fallback.copy()
+    if r.roi:
+        x0, y0, x1, y1 = r.roi
+        out[y0:y1, x0:x1] = r.plate
+    return out
+
+
 def vm(mode="full", **kw):
     cfg = dataclasses.replace(VanishConfig(), mask_mode=mode, **kw)
     return VanishMask(cfg, (W, H), (W, H))
@@ -47,9 +64,10 @@ def test_dilation_grows_segmenter_mask():
     v = vm("seg_only", dilate_px=40)
     v.set_plate(plate)
     r = v.compute(live, seg_covering(200, 400), [])
-    assert r.mask.shape == (H, W) and r.mask.dtype == np.float32
-    assert r.mask[200, 190] > 0.9 and r.mask[200, 410] > 0.9  # grown beyond the segmenter edge
-    assert r.mask[200, 100] == 0.0
+    assert full_mask(r).shape == (H, W) and r.mask.dtype == np.float32
+    assert r.roi is not None and r.mask.shape == (r.roi[3] - r.roi[1], r.roi[2] - r.roi[0])  # only the ROI is built
+    assert full_mask(r)[200, 190] > 0.9 and full_mask(r)[200, 410] > 0.9  # grown beyond the segmenter edge
+    assert full_mask(r)[200, 100] == 0.0
 
 
 def test_hand_hull_covers_missed_hand():
@@ -58,11 +76,11 @@ def test_hand_hull_covers_missed_hand():
     v.set_plate(plate)
     hands = [hand_at(0.8, 0.5)]
     r = v.compute(live, np.zeros((H, W), np.float32), hands)
-    assert r.mask[int(0.5 * H), int(0.8 * W)] > 0.9
-    assert r.mask[10, 10] == 0.0
+    assert full_mask(r)[int(0.5 * H), int(0.8 * W)] > 0.9
+    assert full_mask(r)[10, 10] == 0.0
     v2 = vm("seg_only", dilate_px=0)
     v2.set_plate(plate)
-    assert v2.compute(live, np.zeros((H, W), np.float32), hands).mask.max() == 0.0
+    assert v2.compute(live, np.zeros((H, W), np.float32), hands).roi is None  # nothing to replace
 
 
 def test_plate_difference_fills_what_segmenter_missed():
@@ -70,12 +88,12 @@ def test_plate_difference_fills_what_segmenter_missed():
     seg = seg_covering(200, 260)  # only a strip of the person
     seg_hands = vm("seg_hands", dilate_px=0)
     seg_hands.set_plate(plate)
-    full = vm("full", dilate_px=0)
+    full = vm("full", dilate_px=0, near_me_px=200)  # wide zone: the unsegmented rest of the person is "near me"
     full.set_plate(plate)
-    missed = seg_hands.compute(live, seg, []).mask[200, 350]
-    covered = full.compute(live, seg, []).mask[200, 350]
+    missed = full_mask(seg_hands.compute(live, seg, []))[200, 350]
+    covered = full_mask(full.compute(live, seg, []))[200, 350]
     assert missed < 0.1 and covered > 0.9
-    assert full.compute(live, seg, []).mask[20, 20] < 0.05  # empty background stays untouched
+    assert full_mask(full.compute(live, seg, []))[20, 20] < 0.05  # empty background stays untouched
 
 
 def test_brightness_matching_estimates_gain_and_fixes_difference():
@@ -84,11 +102,12 @@ def test_brightness_matching_estimates_gain_and_fixes_difference():
     v.set_plate(plate)
     r = v.compute(live, seg_covering(200, 400), [])
     assert v.gain == pytest.approx([1.2, 1.2, 1.2], abs=0.03)
-    # the matched plate is close to live in the background, the raw plate was ~20% darker
-    bg = (slice(0, 80), slice(0, W))
-    assert abs(float(r.plate[bg].mean()) - float(live[bg].mean())) < 3
-    assert abs(float(plate[bg].mean()) - float(live[bg].mean())) > 10
-    assert r.mask[20, 20] < 0.05  # matching must prevent the plate-difference mask flagging the whole frame
+    # inside the ROI the matched plate is the plate brightened by the true 1.2 (the raw one is ~17% off)
+    x0, y0, x1, y1 = r.roi
+    expected = np.clip(plate[y0:y1, x0:x1].astype(np.float32) * 1.2, 0, 255)
+    assert abs(float(r.plate.mean()) - float(expected.mean())) < 3
+    assert abs(float(plate[y0:y1, x0:x1].mean()) - float(expected.mean())) > 10
+    assert full_mask(r)[20, 20] < 0.05  # matching must prevent the plate-difference mask flagging the whole frame
 
 
 def test_without_matching_a_lighting_change_is_ignored_not_vanished():
@@ -97,7 +116,7 @@ def test_without_matching_a_lighting_change_is_ignored_not_vanished():
     v.set_plate(plate)
     r = v.compute(live, seg_covering(200, 400), [])
     assert v.stats.diff_skipped == 1  # most of the frame differs -> difference mask skipped, not a frozen frame
-    assert r.mask[20, 20] < 0.05
+    assert full_mask(r)[20, 20] < 0.05
 
 
 def test_gain_offset_recovers_offset():
@@ -118,4 +137,79 @@ def test_result_pieces_for_debug_view():
     r = v.compute(live, seg_covering(200, 400), [hand_at(0.8, 0.5)])
     for piece in (r.seg, r.grown, r.hull, r.diff):
         assert piece.shape == (H, W)
-    assert r.plate.shape == (H, W, 3) and r.plate.dtype == np.uint8
+    assert r.plate.dtype == np.uint8 and r.plate.shape[:2] == r.mask.shape
+
+
+def test_plate_difference_only_near_me_moved_objects_elsewhere_stay_live():
+    plate, live = scene()
+    live[20:80, 500:600] = (0, 0, 255)  # an object that moved, far from the person
+    v = vm("full", dilate_px=0, near_me_px=70)
+    v.set_plate(plate)
+    r = v.compute(live, seg_covering(200, 400), [])
+    assert full_mask(r)[50, 550] < 0.05          # stays live: not replaced by the old plate
+    assert r.zone[200, 300] > 0.9 and r.zone[50, 550] < 0.05
+    wide = vm("full", dilate_px=0, near_me_px=700)
+    wide.set_plate(plate)
+    assert full_mask(wide.compute(live, seg_covering(200, 400), []))[50, 550] > 0.9  # zone covering it -> vanished
+
+
+def test_near_me_zone_follows_hand_hulls():
+    plate, live = scene()
+    live[250:300, 520:560] = (0, 0, 255)  # something that changed right next to the raised hand
+    v = vm("full", dilate_px=0, near_me_px=70)
+    v.set_plate(plate)
+    r = v.compute(live, np.zeros((H, W), np.float32), [hand_at(0.8, 0.75)])
+    assert r.zone[int(0.75 * H), int(0.8 * W)] > 0.9
+
+
+def uneven_scene(left=0.8, right=1.3):
+    plate = make_plate()
+    ramp = np.linspace(left, right, W, dtype=np.float32)[None, :, None]  # lighting varies across the frame
+    live = np.clip(plate.astype(np.float32) * ramp, 0, 255).astype(np.uint8)
+    live[100:300, 200:400] = (30, 200, 60)
+    return plate, live
+
+
+def settled(mode, plate, live, frames=6):
+    v = vm("full", plate_match=mode, dilate_px=0, plate_match_smoothing=1.0)
+    v.set_plate(plate)
+    for _ in range(frames):
+        v.compute(live, seg_covering(200, 400), [])
+    return v
+
+
+def test_gain_map_beats_global_gain_on_uneven_lighting():
+    plate, live = uneven_scene()
+    global_v, map_v = settled("gain", plate, live), settled("gain_map", plate, live)
+    for v in (global_v, map_v):
+        v.stats.reset()
+        for _ in range(4):  # statistics are sampled on every 2nd estimate, estimates on every 2nd frame
+            v.compute(live, seg_covering(200, 400), [])
+    g, m = global_v.stats, map_v.stats
+    assert m.resid_mean_abs / m.resid_n < 0.5 * (g.resid_mean_abs / g.resid_n)
+    assert m.resid_max_abs < g.resid_max_abs
+    assert m.gain_min < 0.9 and m.gain_max > 1.2  # the grid really varies
+
+
+def test_gain_map_applied_to_full_resolution_plate():
+    plate, live = uneven_scene()
+    v = settled("gain_map", plate, live)
+    r = v.compute(live, seg_covering(200, 400), [])
+    x0, y0, x1, y1 = r.roi
+    ramp = np.linspace(0.8, 1.3, W, dtype=np.float32)[None, x0:x1, None]  # the true lighting across the ROI
+    expected = np.clip(plate[y0:y1, x0:x1].astype(np.float32) * ramp, 0, 255)
+    assert np.abs(r.plate.astype(np.float32) - expected).mean() < 4
+    # and the left edge is darker than the right edge, as the lighting is
+    assert r.plate[:, :20].mean() / plate[y0:y1, x0:x0 + 20].mean() < r.plate[:, -20:].mean() / plate[y0:y1, x1 - 20:x1].mean()
+
+
+def test_fill_missing_cells_borrows_from_neighbours():
+    grid = np.ones((6, 8, 3), np.float32) * 1.0
+    grid[0, 0] = 1.4
+    valid = np.ones((6, 8), bool)
+    valid[2:4, 3:5] = False
+    grid[2:4, 3:5] = 9.0  # garbage in the invalid cells
+    filled, ok = fill_missing_cells(grid, valid)
+    assert ok.all() and filled[2:4, 3:5].max() < 2.0
+    _, none_ok = fill_missing_cells(grid, np.zeros((6, 8), bool))
+    assert not none_ok.any()  # nothing valid: nothing to borrow

@@ -21,6 +21,19 @@ def composite(frame: np.ndarray, mask: np.ndarray, plate: np.ndarray) -> np.ndar
     return np.clip(out + 0.5, 0, 255).astype(np.uint8)
 
 
+def composite_roi(frame: np.ndarray, mask: np.ndarray, plate: np.ndarray,
+                  roi: tuple[int, int, int, int]) -> np.ndarray:
+    """Like `composite`, but only inside roi = (x0, y0, x1, y1); `mask` and `plate` cover just that
+    rectangle. The rest of the frame is copied unchanged (the mask is zero there anyway)."""
+    x0, y0, x1, y1 = roi
+    part = np.ascontiguousarray(frame[y0:y1, x0:x1])
+    if part.shape != plate.shape:
+        raise ValueError(f"plate {plate.shape} does not match region {part.shape}")
+    out = frame.copy()
+    out[y0:y1, x0:x1] = cv2.blendLinear(part, plate, 1.0 - mask, mask)
+    return out
+
+
 class Compositor:
     """Builds the frame sent to the virtual camera.
 
@@ -29,7 +42,7 @@ class Compositor:
     """
 
     def render(self, frame: np.ndarray, mask: np.ndarray | None, plate: np.ndarray | None,
-               dt: float, vanish: bool = False) -> np.ndarray:
+               dt: float, vanish: bool = False, roi: tuple[int, int, int, int] | None = None) -> np.ndarray:
         if vanish and mask is not None and plate is not None:
-            return composite(frame, mask, plate)
+            return composite_roi(frame, mask, plate, roi) if roi else composite(frame, mask, plate)
         return frame
