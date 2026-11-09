@@ -18,8 +18,11 @@ perception:
   mask_feather_low: 0.35       # confidence at/below this -> 0
   mask_feather_high: 0.65      # confidence at/above this -> 1 (smooth in between)
   mask_temporal_alpha: 0.6     # weight of the new mask vs the previous one (1 = no smoothing)
-  segment_every_n: 2           # run segmentation every Nth frame, reuse the last mask otherwise
-                               # (2: loop was 17-20 fps with 1; see docs/evidence/phase-2/)
+  mask_temporal: attack_release  # attack_release: mask = max(current, previous * decay), so it grows
+                               # instantly and shrinks slowly; symmetric: the old alpha blend
+  mask_release_decay: 0.85     # attack_release: how much of the previous mask survives each frame
+  segment_every_n: 1           # run segmentation every Nth frame (every frame: vanish needs a fresh mask;
+                               # 2 was needed in Phase 2 when hands ran inline, now they run on a thread)
   hands_async: true            # hand tracking on its own thread, always on the latest frame
 
 camera:
@@ -28,6 +31,20 @@ camera:
 
 preview:
   every_n: 2                   # update the preview window every Nth frame (vcam output is every frame)
+
+vanish:                        # the mask used when V replaces you with the plate. Over-covering is free,
+                               # under-covering shows you, so everything is biased toward covering.
+  mask_mode: full              # seg_only | seg_hands | full (segmenter + hand hulls + plate difference)
+  dilate_px: 15                # grow the segmenter mask (px at 1280 wide)
+  hand_hull_dilate_px: 25      # grow each hand's filled convex hull (landmarks are ~50 ms old)
+  feather_px: 7                # soften hull / plate-difference edges
+  plate_diff_threshold: 28     # gray levels of |live - matched plate| counted as "not background"
+  plate_diff_open_px: 3        # morphological open on the difference mask (remove speckle)
+  plate_diff_close_px: 9       # morphological close (fill holes)
+  plate_diff_max_fraction: 0.5 # skip the difference mask if it covers more than this (lighting change)
+  plate_match: gain            # off | gain | gain_offset: match the plate's brightness/colour to live
+  plate_match_smoothing: 0.15  # weight of each frame's estimate in the running gain/offset
+  match_margin_px: 30          # background used for matching lies this far outside the mask
 
 plate:                         # clean plate of the empty room (plates/ is local-only, gitignored)
   frames: 30                   # frames averaged into the plate

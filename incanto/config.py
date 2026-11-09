@@ -46,7 +46,9 @@ class PerceptionConfig:
     mask_feather_low: float = 0.35
     mask_feather_high: float = 0.65
     mask_temporal_alpha: float = 0.6
-    segment_every_n: int = 2
+    mask_temporal: str = "attack_release"  # attack_release | symmetric
+    mask_release_decay: float = 0.85       # attack_release: mask = max(current, previous * decay)
+    segment_every_n: int = 1
     hands_async: bool = True
 
 
@@ -58,6 +60,28 @@ class PreviewConfig:
 @dataclass(frozen=True)
 class CameraConfig:
     exposure: float | None = None  # None = auto; else manual exposure in log2 seconds (e.g. -6 = 1/64 s)
+
+
+VANISH_MASK_MODES = ("seg_only", "seg_hands", "full")
+PLATE_MATCH_MODES = ("off", "gain", "gain_offset")
+
+
+@dataclass(frozen=True)
+class VanishConfig:
+    """Mask used when the person is replaced by the plate. Over-covering is free (the plate IS the
+    background); under-covering reveals the person, so everything here biases toward covering.
+    Pixel sizes are at 1280 px frame width and are scaled to the perception resolution."""
+    mask_mode: str = "full"              # seg_only | seg_hands | full (seg + hands + plate difference)
+    dilate_px: int = 15                  # grow the segmenter mask
+    hand_hull_dilate_px: int = 25        # grow the filled convex hull of each hand (landmarks are ~50 ms old)
+    feather_px: int = 7                  # soften hull / plate-difference edges
+    plate_diff_threshold: int = 28       # gray levels of |live - matched plate| that count as "not background"
+    plate_diff_open_px: int = 3          # morphological open: remove speckle
+    plate_diff_close_px: int = 9         # morphological close: fill holes
+    plate_diff_max_fraction: float = 0.5  # ignore the difference mask above this coverage (lighting change)
+    plate_match: str = "gain"            # off | gain | gain_offset: match the plate to the live brightness/colour
+    plate_match_smoothing: float = 0.15  # weight of each frame's estimate in the running gain/offset
+    match_margin_px: int = 30            # background used for matching is this far outside the mask
 
 
 @dataclass(frozen=True)
@@ -93,6 +117,7 @@ class Config:
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     preview: PreviewConfig = field(default_factory=PreviewConfig)
     plate: PlateConfig = field(default_factory=PlateConfig)
+    vanish: VanishConfig = field(default_factory=VanishConfig)
     triggers: TriggersConfig = field(default_factory=TriggersConfig)
     mappings: dict[str, str] = field(default_factory=dict)
     gestures: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -159,6 +184,7 @@ def load_config(path: str | Path | None = None) -> Config:
     perception = _build(PerceptionConfig, "perception", _section(raw, "perception"))
     preview = _build(PreviewConfig, "preview", _section(raw, "preview"))
     plate = _build(PlateConfig, "plate", _section(raw, "plate"))
+    vanish = _build(VanishConfig, "vanish", _section(raw, "vanish"))
 
     if video.width <= 0 or video.height <= 0:
         raise ConfigError("video.width and video.height must be positive")
@@ -187,11 +213,28 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError("perception.mask_temporal_alpha must be in (0, 1]")
     if perception.mask_blur_px < 0:
         raise ConfigError("perception.mask_blur_px must be >= 0")
+    if perception.mask_temporal not in ("attack_release", "symmetric"):
+        raise ConfigError("perception.mask_temporal must be 'attack_release' or 'symmetric'")
+    if not 0 <= perception.mask_release_decay < 1:
+        raise ConfigError("perception.mask_release_decay must be in [0, 1)")
     if perception.segment_every_n < 1:
         raise ConfigError("perception.segment_every_n must be >= 1")
 
     if preview.every_n < 1:
         raise ConfigError("preview.every_n must be >= 1")
+
+    if vanish.mask_mode not in VANISH_MASK_MODES:
+        raise ConfigError(f"vanish.mask_mode must be one of {VANISH_MASK_MODES}, got '{vanish.mask_mode}'")
+    if vanish.plate_match not in PLATE_MATCH_MODES:
+        raise ConfigError(f"vanish.plate_match must be one of {PLATE_MATCH_MODES}, got '{vanish.plate_match}'")
+    for key in ("dilate_px", "hand_hull_dilate_px", "feather_px", "plate_diff_open_px",
+                "plate_diff_close_px", "match_margin_px", "plate_diff_threshold"):
+        if getattr(vanish, key) < 0:
+            raise ConfigError(f"vanish.{key} must be >= 0")
+    if not 0 < vanish.plate_match_smoothing <= 1:
+        raise ConfigError("vanish.plate_match_smoothing must be in (0, 1]")
+    if not 0 < vanish.plate_diff_max_fraction <= 1:
+        raise ConfigError("vanish.plate_diff_max_fraction must be in (0, 1]")
 
     if plate.frames < 1:
         raise ConfigError("plate.frames must be >= 1")
@@ -213,6 +256,7 @@ def load_config(path: str | Path | None = None) -> Config:
         perception=perception,
         preview=preview,
         plate=plate,
+        vanish=vanish,
         triggers=triggers,
         mappings=dict(mappings),
         gestures=_section(raw, "gestures"),

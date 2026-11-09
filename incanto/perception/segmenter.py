@@ -19,12 +19,16 @@ class Segmenter:
 
     def __init__(self, model_path, out_size: tuple[int, int], *, blur_px: int = 5,
                  feather_low: float = 0.35, feather_high: float = 0.65,
-                 temporal_alpha: float = 0.6, every_n: int = 1):
+                 temporal_alpha: float = 0.6, every_n: int = 1,
+                 temporal_mode: str = "attack_release", release_decay: float = 0.85):
         self.out_size = out_size
         self.blur_px = (blur_px | 1) if blur_px > 0 else 0  # Gaussian kernels must be odd
         self.feather_low, self.feather_high = feather_low, feather_high
         self.alpha = temporal_alpha
         self.every_n = max(1, every_n)
+        self.temporal_mode = temporal_mode  # attack_release | symmetric
+        self.release_decay = release_decay
+        self.small: np.ndarray | None = None  # latest mask at perception resolution (before the upscale)
         self._clock = MonotonicMs()
         self._frame_no = 0
         self._prev_small: np.ndarray | None = None
@@ -54,8 +58,15 @@ class Segmenter:
         raw = np.array(result.confidence_masks[0].numpy_view(), dtype=np.float32).reshape(rgb.shape[:2])
         mask = self._smooth_edges(raw)
         if self._prev_small is not None and self._prev_small.shape == mask.shape:
-            mask = self.alpha * mask + (1.0 - self.alpha) * self._prev_small
+            if self.temporal_mode == "attack_release":
+                # Fast attack, slow release: the mask grows instantly and shrinks gradually, so a
+                # late detection never shows the person (under-covering is the costly error).
+                mask = np.maximum(mask, self._prev_small * self.release_decay)
+                mask[mask < 0.02] = 0.0  # no lingering haze
+            else:
+                mask = self.alpha * mask + (1.0 - self.alpha) * self._prev_small
         self._prev_small = mask
+        self.small = mask
         self._last_full = cv2.resize(mask, self.out_size, interpolation=cv2.INTER_LINEAR).astype(
             np.float32, copy=False)
         return self._last_full
