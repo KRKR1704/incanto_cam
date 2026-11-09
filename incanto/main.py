@@ -244,7 +244,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
             if vanish_on and plate and not capture.active:
                 vresult = vmask.compute(small, segmenter.small, hand_list, timer)
                 with timer.stage("composite"):
-                    out = compositor.render(frame, vresult.mask, vresult.plate, dt, vanish=True)
+                    out = (compositor.render(frame, vresult.mask, vresult.plate, dt, vanish=True, roi=vresult.roi)
+                           if vresult.roi else frame)
             else:
                 out = frame
             with timer.stage("vcam"):
@@ -351,15 +352,17 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 if vanish_on:
                     st = vmask.stats
                     if st.n:
-                        n = st.n
+                        n, rn = st.n, max(st.resid_n, 1)
                         g = st.gain / n
-                        log.info("vanish lighting [%s match]: background live %.1f | plate raw %.1f (diff %+.1f) -> "
-                                 "matched %.1f (residual diff %+.1f) | gain BGR %.2f/%.2f/%.2f offset %+.1f/%+.1f/%+.1f "
-                                 "| background %.0f%% of frame | plate-diff mask used %d, skipped %d frames",
+                        log.info("vanish lighting [%s]: background live %.1f | plate raw %.1f (diff %+.1f) -> "
+                                 "matched %.1f (diff %+.1f) | per-cell residual mean|r| %.2f signed %+.2f max|r| %.1f "
+                                 "(%d cells/frame) | gain BGR %.2f/%.2f/%.2f (cells %.2f..%.2f) offset %+.1f/%+.1f/%+.1f "
+                                 "| background %.0f%% | plate-diff used %d, skipped %d frames",
                                  cfg.vanish.plate_match, st.live / n, st.raw_plate / n,
                                  (st.live - st.raw_plate) / n, st.matched_plate / n,
-                                 (st.live - st.matched_plate) / n, *g, *(st.offset / n),
-                                 st.fraction / n * 100, st.diff_frames, st.diff_skipped)
+                                 (st.live - st.matched_plate) / n, st.resid_mean_abs / rn, st.resid_signed / rn,
+                                 st.resid_max_abs, st.cells // rn, *g, st.gain_min, st.gain_max,
+                                 *(st.offset / n), st.fraction / n * 100, st.diff_frames, st.diff_skipped)
                     else:
                         log.info("vanish lighting: not enough visible background to compare")
                     vmask.stats.reset()

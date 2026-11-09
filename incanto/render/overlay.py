@@ -103,4 +103,11 @@ def draw_vanish_sources(img: np.ndarray, result, strength: float = 0.55) -> None
     layer = cv2.resize(layer, (w, h), interpolation=cv2.INTER_NEAREST)
     covered = layer.any(axis=2)
     img[covered] = cv2.addWeighted(img, 1 - strength, layer, strength, 0)[covered]
-    _text(img, "green seg | yellow grow | blue hands | red plate-diff", (16, img.shape[0] - 46), scale=0.55)
+    if result.zone.any():  # outline of the "near me" zone: plate difference only counts inside it
+        zone = (result.zone > 0.5).astype(np.uint8)
+        contours, _ = cv2.findContours(zone, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        sx, sy = w / zone.shape[1], h / zone.shape[0]
+        for c in contours:
+            cv2.polylines(img, [(c * (sx, sy)).astype(np.int32)], True, (255, 0, 255), 2, cv2.LINE_AA)
+    _text(img, "green seg | yellow grow | blue hands | red plate-diff | magenta = near-me zone",
+          (16, img.shape[0] - 46), scale=0.55)
