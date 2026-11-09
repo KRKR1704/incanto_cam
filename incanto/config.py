@@ -61,6 +61,19 @@ class CameraConfig:
 
 
 @dataclass(frozen=True)
+class PlateConfig:
+    frames: int = 30                     # frames averaged into the clean plate
+    countdown_s: float = 3.0             # preview-only countdown after pressing B (time to leave the frame)
+    settle_s: float = 1.0                # extra wait for auto exposure to settle on the empty room
+    max_person_coverage: float = 0.02    # abort if the mask covers more than this fraction of the frame
+    dir: str = "plates"                  # local-only (gitignored): a photo of your room
+
+    def resolve_dir(self) -> Path:
+        path = Path(self.dir)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+@dataclass(frozen=True)
 class VCamConfig:
     backend: str = "obs"
 
@@ -79,6 +92,7 @@ class Config:
     models: ModelsConfig = field(default_factory=ModelsConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     preview: PreviewConfig = field(default_factory=PreviewConfig)
+    plate: PlateConfig = field(default_factory=PlateConfig)
     triggers: TriggersConfig = field(default_factory=TriggersConfig)
     mappings: dict[str, str] = field(default_factory=dict)
     gestures: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -144,6 +158,7 @@ def load_config(path: str | Path | None = None) -> Config:
     models = _build(ModelsConfig, "models", _section(raw, "models"))
     perception = _build(PerceptionConfig, "perception", _section(raw, "perception"))
     preview = _build(PreviewConfig, "preview", _section(raw, "preview"))
+    plate = _build(PlateConfig, "plate", _section(raw, "plate"))
 
     if video.width <= 0 or video.height <= 0:
         raise ConfigError("video.width and video.height must be positive")
@@ -178,6 +193,13 @@ def load_config(path: str | Path | None = None) -> Config:
     if preview.every_n < 1:
         raise ConfigError("preview.every_n must be >= 1")
 
+    if plate.frames < 1:
+        raise ConfigError("plate.frames must be >= 1")
+    if plate.countdown_s < 0 or plate.settle_s < 0:
+        raise ConfigError("plate.countdown_s and plate.settle_s must be >= 0")
+    if not 0 <= plate.max_person_coverage <= 1:
+        raise ConfigError("plate.max_person_coverage must be between 0 and 1")
+
     mappings = _section(raw, "mappings")
     for gesture, spell in mappings.items():
         if not isinstance(spell, str):
@@ -190,6 +212,7 @@ def load_config(path: str | Path | None = None) -> Config:
         models=models,
         perception=perception,
         preview=preview,
+        plate=plate,
         triggers=triggers,
         mappings=dict(mappings),
         gestures=_section(raw, "gestures"),

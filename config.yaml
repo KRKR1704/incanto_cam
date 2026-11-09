@@ -29,6 +29,13 @@ camera:
 preview:
   every_n: 2                   # update the preview window every Nth frame (vcam output is every frame)
 
+plate:                         # clean plate of the empty room (plates/ is local-only, gitignored)
+  frames: 30                   # frames averaged into the plate
+  countdown_s: 3.0             # preview-only countdown after pressing B: time to leave the frame
+  settle_s: 1.0                # extra wait for auto exposure to settle on the empty room
+  max_person_coverage: 0.02    # abort the capture if the person mask covers more than this fraction
+  dir: plates
+
 vcam:
   backend: obs                 # obs | unitycapture
 
