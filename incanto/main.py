@@ -12,7 +12,8 @@ import cv2
 import psutil
 
 from incanto.config import ConfigError, load_config
-from incanto.io.camera import EXPOSURE_MAX, EXPOSURE_MIN, Camera, CameraError, ThreadedCamera
+from incanto.io.camera import (EXPOSURE_MAX, EXPOSURE_MIN, Camera, CameraError, ThreadedCamera,
+                               install_exit_guard)
 from incanto.io.vcam import VCamError, VirtualCamera
 from incanto.perception.hands import HandsWorker, HandTracker
 from incanto.perception.segmenter import Segmenter
@@ -65,6 +66,31 @@ def show_camera_settings(config_path: str | None) -> int:
             cam.release()
 
 
+def reset_camera(config_path: str | None) -> int:
+    """Write auto exposure to the camera (the driver remembers manual exposure across processes)."""
+    try:
+        cfg = load_config(config_path)
+    except ConfigError as exc:
+        log.error("Config error: %s", exc)
+        return 2
+    cam = None
+    try:
+        cam = Camera(cfg.video.width, cfg.video.height, cfg.video.fps)
+        before = cam.mean_brightness()
+        accepted = cam.set_auto_exposure()
+        time.sleep(1.0)
+        after = cam.mean_brightness(15)
+        log.info("--reset-camera: auto exposure written (accepted=%s) | mean brightness before %.0f -> after %.0f",
+                 accepted, before, after)
+        return 0 if accepted else 1
+    except CameraError as exc:
+        log.error("%s", exc)
+        return 1
+    finally:
+        if cam:
+            cam.release()
+
+
 def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         lock_exposure: float | None = None, perf_tweaks: bool = True,
         segment_every: int | None = None, evidence_dir: str | None = None,
@@ -87,7 +113,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
     if perf_tweaks:
         winperf.apply_perf_tweaks()
 
-    cam = vcam = hands = segmenter = None
+    cam = raw_cam = vcam = hands = segmenter = None
+    install_exit_guard()
     try:
         hands_model = cfg.models.resolve("hand_landmarker")
         seg_model = cfg.models.resolve("selfie_segmenter")
@@ -248,8 +275,14 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         for closable in (hands, segmenter, vcam):
             if closable:
                 closable.close() if hasattr(closable, "close") else None
-        if cam:
-            cam.release()
+        # Release the camera on every path, even if setup failed before the wrapper existed; this
+        # (plus the atexit hook in io/camera.py) restores auto exposure if we left it manual.
+        for c in (cam, raw_cam if cam is None else None):
+            if c:
+                try:
+                    c.release()
+                except Exception:  # noqa: BLE001
+                    log.exception("Camera release failed")
         cv2.destroyAllWindows()
         log.info("Shut down cleanly.")
 
@@ -265,6 +298,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="do not opt out of power throttling or raise process priority")
     parser.add_argument("--camera-settings", action="store_true",
                         help="show the camera driver's own property dialog (DirectShow), wait for it to close, then exit")
+    parser.add_argument("--reset-camera", action="store_true",
+                        help="write auto exposure to the camera, log brightness before/after, then exit "
+                             "(use if the webcam looks dark after a crash)")
     parser.add_argument("--segment-every", type=int, metavar="N",
                         help="override perception.segment_every_n from config.yaml")
     parser.add_argument("--capture-mode", choices=("inline", "threaded"),
@@ -274,6 +310,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
     setup_logging(args.log_level)
+    if args.reset_camera:
+        return reset_camera(args.config)
     if args.camera_settings:
         return show_camera_settings(args.config)
     return run(args.config, args.seconds, not args.no_preview, args.lock_exposure,

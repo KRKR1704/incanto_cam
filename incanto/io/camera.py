@@ -1,12 +1,73 @@
 """Webcam capture via OpenCV."""
 from __future__ import annotations
 
+import atexit
 import logging
+import threading
 
 import cv2
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+# Safety net: the driver REMEMBERS manual exposure across processes, so a crash while we hold manual
+# exposure could leave the webcam dark in every app. Every Camera that switched to manual is tracked
+# here and put back to auto by an atexit hook (and by main's try/finally and signal handlers).
+_MANUAL_CAMERAS: set["Camera"] = set()
+_MANUAL_LOCK = threading.Lock()
+
+
+def restore_auto_exposure_all(reason: str = "exit") -> int:
+    """Put every camera we left on manual exposure back to auto. Safe to call repeatedly; returns count."""
+    with _MANUAL_LOCK:
+        cams = list(_MANUAL_CAMERAS)
+    restored = 0
+    for cam in cams:
+        try:
+            if cam.set_auto_exposure():
+                restored += 1
+            log.info("Safety net (%s): restored auto exposure on camera %d.", reason, cam.index)
+        except Exception as exc:  # noqa: BLE001 - never raise from an exit path
+            log.error("Safety net (%s): could NOT restore auto exposure on camera %d: %s. "
+                      "Run: python -m incanto --reset-camera", reason, cam.index, exc)
+    return restored
+
+
+atexit.register(restore_auto_exposure_all, "atexit")
+
+
+def install_exit_guard() -> None:
+    """Restore auto exposure on SIGTERM/SIGBREAK and on console close (Windows); Ctrl+C is covered by
+    the KeyboardInterrupt path. Call once from the entry point (main thread only)."""
+    import signal
+
+    def _on_signal(signum, _frame):
+        restore_auto_exposure_all(f"signal {signum}")
+        raise SystemExit(1)
+
+    for name in ("SIGTERM", "SIGBREAK"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, _on_signal)
+            except (ValueError, OSError):
+                pass
+    try:  # closing the console window kills the process without running atexit
+        import ctypes
+        from ctypes import wintypes
+
+        handler_t = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+
+        def _console_handler(ctrl_type):
+            if ctrl_type in (2, 5, 6):  # CTRL_CLOSE / LOGOFF / SHUTDOWN
+                restore_auto_exposure_all(f"console event {ctrl_type}")
+            return False  # let the default handling continue
+
+        global _CONSOLE_HANDLER
+        _CONSOLE_HANDLER = handler_t(_console_handler)  # keep a reference alive
+        ctypes.windll.kernel32.SetConsoleCtrlHandler(_CONSOLE_HANDLER, True)
+    except (AttributeError, OSError):
+        pass
 
 EXPOSURE_MIN, EXPOSURE_MAX = -13.0, 0.0
 # Exposure is log2(seconds) on this backend: -5 = 31 ms, about one 30 fps frame period. Longer than
@@ -93,6 +154,8 @@ class Camera:
         """Switch to manual exposure at `value` (log2 seconds). True if the driver accepted both writes."""
         value = float(min(EXPOSURE_MAX, max(EXPOSURE_MIN, value)))
         self._manual_exposure = True
+        with _MANUAL_LOCK:
+            _MANUAL_CAMERAS.add(self)
         auto_ok = self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # 0.25 = manual (verified on this camera)
         exp_ok = self._cap.set(cv2.CAP_PROP_EXPOSURE, value)
         if value > EXPOSURE_FPS_LIMIT:
@@ -103,8 +166,11 @@ class Camera:
     def set_auto_exposure(self) -> bool:
         """Hand exposure back to the camera. The driver REMEMBERS manual exposure across processes, so
         this must be done explicitly (0.75 = auto; verified: it restores normal brightness)."""
+        ok = bool(self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75))
         self._manual_exposure = False
-        return bool(self._cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75))
+        with _MANUAL_LOCK:
+            _MANUAL_CAMERAS.discard(self)
+        return ok
 
     def apply_auto_exposure(self) -> bool:
         """set_auto_exposure + a before/after brightness check, for use at camera open."""
@@ -132,6 +198,8 @@ class Camera:
             # Don't leave the driver stuck on a manual exposure for the next app (e.g. Meet using the webcam).
             self.set_auto_exposure()
             log.info("Restored auto exposure on the camera.")
+        with _MANUAL_LOCK:
+            _MANUAL_CAMERAS.discard(self)
         self._cap.release()
 
 
@@ -223,5 +291,7 @@ class ThreadedCamera:
 
     def release(self) -> None:
         self._stop = True
-        self._thread.join(timeout=3.0)
-        self._cam.release()
+        try:
+            self._thread.join(timeout=3.0)
+        finally:
+            self._cam.release()  # restores auto exposure if we left it manual

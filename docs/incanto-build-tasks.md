@@ -20,13 +20,13 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 0 | Setup | 7 | 0.5 h | ☑ |
 | 1 | Camera pipeline | 7 | 1.5 h | ☑ |
 | 2 | Perception | 9 | 2.5 h | ☑ |
-| 3 | Clean plate | 6 | 1 h | ☐ |
+| 3 | Clean plate | 7 | 1 h | ☐ |
 | 4 | Record & replay | 7 | 1.5 h | ☐ |
 | 5 | Gesture engine | 11 | 4 h | ☐ |
 | 6 | Vanish spell | 11 | 4 h | ☐ |
 | 7 | More spells | 7 | 5 h | ☐ |
 | 8 | Polish & packaging | 10 | 3 h | ☐ |
-| **Total** | | **75** | **~23 h** | |
+| **Total** | | **76** | **~23 h** | |
 
 ---
 
@@ -90,6 +90,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 3.4 | Save/load the plate to `plates/` (gitignored, local-only: it is a photo of the room) so it survives restarts (invalidated if the resolution changes) | 3.1 | 10m | [ ] |
 | 3.5 | `render/compositor.py`: `composite(frame, mask, plate)` replaces masked pixels with plate pixels | 2.4, 3.1 | 10m | [ ] |
 | 3.6 | Debug hotkey `V`: toggle instant vanish using the compositor | 3.5 | 5m | [ ] |
+| 3.7 | Camera safety net: restore auto exposure on any exit (try/finally, atexit, signals, console close) when it was set manual; `--reset-camera` command | 1.2 | 20m | [x] |
 
 **Phase gate:** Pressing `V` makes you disappear with no visible hole or ghosting, live in Meet. Save before/after screenshots (local-only).
 

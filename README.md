@@ -22,6 +22,16 @@ See `docs/incanto-project-plan.md` and `docs/incanto-build-tasks.md` for the pla
 
 **Status: Phase 0** (setup and scaffolding only; no functionality yet).
 
+## Camera dark after a crash? `--reset-camera`
+
+The camera driver remembers a manual exposure across processes. Incanto restores auto exposure on every normal exit path (error, Ctrl+C, closing the window, SIGTERM, console close, interpreter exit). A hard kill (Task Manager, power loss) cannot be intercepted, so if your webcam looks dark in other apps, run:
+
+```
+.venv\Scripts\python -m incanto --reset-camera
+```
+
+It writes auto exposure to the camera, logs the mean brightness before and after, and exits.
+
 ## Privacy
 
 This repository is public, and Incanto is built so that nothing of you ever ends up in it:
