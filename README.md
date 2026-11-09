@@ -22,6 +22,12 @@ See `docs/incanto-project-plan.md` and `docs/incanto-build-tasks.md` for the pla
 
 **Status: Phase 0** (setup and scaffolding only; no functionality yet).
 
+## Vanish test (Phase 3)
+
+Hotkeys work in the preview window: **B** captures a clean plate of the empty room (3 s countdown, leave the frame), **V** toggles vanish (applied to the virtual camera output too), **D** debug view, **S** screenshot (with `--shots-dir`), **Q** quit.
+
+`vanish.mask_mode` in `config.yaml` (or `--mask-mode`) picks what hides you: `seg_only` (segmenter), `seg_hands` (plus filled hand hulls) or `full` (plus pixels that differ from the brightness-matched plate). The plate is a photo of your room and is local-only (`plates/`, gitignored). Recapture it whenever furniture moves: in `full` mode anything that differs from the plate is replaced by the plate's version.
+
 ## Camera dark after a crash? `--reset-camera`
 
 The camera driver remembers a manual exposure across processes. Incanto restores auto exposure on every normal exit path (error, Ctrl+C, closing the window, SIGTERM, console close, interpreter exit). A hard kill (Task Manager, power loss) cannot be intercepted, so if your webcam looks dark in other apps, run:

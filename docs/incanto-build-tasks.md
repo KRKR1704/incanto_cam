@@ -20,13 +20,13 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 0 | Setup | 7 | 0.5 h | ☑ |
 | 1 | Camera pipeline | 7 | 1.5 h | ☑ |
 | 2 | Perception | 9 | 2.5 h | ☑ |
-| 3 | Clean plate | 7 | 1 h | ☐ |
+| 3 | Clean plate | 8 | 1 h | ☐ |
 | 4 | Record & replay | 7 | 1.5 h | ☐ |
 | 5 | Gesture engine | 11 | 4 h | ☐ |
 | 6 | Vanish spell | 11 | 4 h | ☐ |
 | 7 | More spells | 7 | 5 h | ☐ |
 | 8 | Polish & packaging | 10 | 3 h | ☐ |
-| **Total** | | **76** | **~23 h** | |
+| **Total** | | **77** | **~23 h** | |
 
 ---
 
@@ -91,6 +91,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 3.5 | `render/compositor.py`: `composite(frame, mask, plate)` replaces masked pixels with plate pixels | 2.4, 3.1 | 10m | [x] |
 | 3.6 | Debug hotkey `V`: toggle instant vanish using the compositor | 3.5 | 5m | [x] |
 | 3.7 | Camera safety net: restore auto exposure on any exit (try/finally, atexit, signals, console close) when it was set manual; `--reset-camera` command | 1.2 | 20m | [x] |
+| 3.8 | Vanish mask quality: segment every frame with fast-attack/slow-release smoothing; dilated segmenter mask; filled hand hulls; plate-difference mask; per-channel plate brightness matching; colour-coded debug view; `vanish.mask_mode` seg_only / seg_hands / full | 3.6 | 1.5h | [x] |
 
 **Phase gate:** Pressing `V` makes you disappear with no visible hole or ghosting, live in Meet. Save before/after screenshots (local-only).
 
@@ -148,7 +149,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 6.8 | Reverting: particles fly back in reverse and the live you fades back in; triggered by the next snap | 6.6 | 30m | [ ] |
 | 6.9 | Hotkey `C`: cancel any spell immediately back to Idle | 6.3 | 5m | [ ] |
 | 6.10 | Render the effect on a replay clip with `--render-out`, review, and tune particle size/speed/stagger | 4.5, 6.8 | 30m | [ ] |
-| 6.11 | Mask fingertip gaps: dilate the mask slightly and union it with a convex hull from the hand landmarks before vanish compositing (the 144x256 segmentation model misses thin fingertips; seen in Phase 2 screenshots) | 6.5, 2.5 | 30m | [ ] |
+| 6.11 | Mask fingertip gaps: dilate the mask slightly and union it with a convex hull from the hand landmarks before vanish compositing (the 144x256 segmentation model misses thin fingertips; seen in Phase 2 screenshots) | 6.5, 2.5 | 30m | [x] (done early in 3.8) |
 
 **Phase gate:** A screen recording **inside a Meet call** of the full cycle: snap → dissolve → invisible while moving → snap → reassemble, with FPS ≥ 24 throughout (log excerpt). The screen recording is local-only; commit only the log excerpt.
 
@@ -178,7 +179,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 8.2 | Hotkey help overlay (`H`): B plate, R record, V vanish test, C cancel, D debug, Q quit | 8.1 | 10m | [ ] |
 | 8.3 | Graceful errors: no camera, no virtual camera driver (with a link to the OBS install), mic unavailable (falls back to visual-only gestures) | 1.2, 1.3, 4.1 | 25m | [ ] |
 | 8.4 | Warn when no clean plate exists and a plate-dependent spell is triggered | 3.4, 6.3 | 10m | [ ] |
-| 8.5 | Exposure drift check: compare the plate to live background edges, prompt to recapture if they drift too far | 3.4 | 25m | [x] |
+| 8.5 | Exposure drift check: compare the plate to live background edges, prompt to recapture if they drift too far | 3.4 | 25m | [x] (plate brightness matching done early in 3.8; the recapture prompt is not implemented) |
 | 8.6 | Final FPS pass against the §8 budget; profile and fix the slowest stage | all | 30m | [ ] |
 | 8.7 | README: setup, OBS note, hotkeys, gesture → spell table, adding spells. No demo GIF/video of the user in the repo (host it outside GitHub, or use non-personal footage) | 7.6 | 30m | [ ] |
 | 8.8 | PyInstaller build → `dist/Incanto.exe` with MediaPipe model files bundled | 8.6 | 30m | [ ] |
