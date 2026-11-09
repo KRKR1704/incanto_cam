@@ -78,3 +78,29 @@ def draw_banner(img: np.ndarray, text: str, warning: bool = False) -> None:
 def draw_status(img: np.ndarray, text: str, row: int = 0) -> None:
     """Small status line under the FPS counter (preview only)."""
     _text(img, text, (16, 70 + row * 30), scale=0.7, color=(0, 200, 255))
+
+
+def draw_vanish_sources(img: np.ndarray, result, strength: float = 0.55) -> None:
+    """Colour-code which source covered each pixel of the vanish mask (preview only).
+
+    green = segmenter, yellow = segmenter dilation margin, blue = hand hull, red = plate difference
+    (only pixels no earlier source covered, so red shows what the plate difference alone adds).
+    """
+    thr = 0.5
+    seg = result.seg > thr
+    grown = result.grown > thr
+    hull = result.hull > thr
+    diff = result.diff > thr
+    layer = np.zeros((*seg.shape, 3), np.uint8)
+    taken = seg.copy()
+    layer[seg] = (0, 255, 0)
+    for name, m, color in (("hull", hull, (255, 128, 0)), ("grown", grown, (0, 255, 255)),
+                           ("diff", diff, (0, 0, 255))):
+        only = m & ~taken
+        layer[only] = color
+        taken |= m
+    h, w = img.shape[:2]
+    layer = cv2.resize(layer, (w, h), interpolation=cv2.INTER_NEAREST)
+    covered = layer.any(axis=2)
+    img[covered] = cv2.addWeighted(img, 1 - strength, layer, strength, 0)[covered]
+    _text(img, "green seg | yellow grow | blue hands | red plate-diff", (16, img.shape[0] - 46), scale=0.55)

@@ -4,7 +4,7 @@ import json
 import numpy as np
 import pytest
 
-from incanto.plate.clean_plate import (PlateAccumulator, PlateCapture, background_brightness, load_plate,
+from incanto.plate.clean_plate import (PlateAccumulator, PlateCapture, load_plate,
                                        make_plate, save_plate)
 from incanto.render.compositor import Compositor, composite
 
@@ -87,13 +87,3 @@ def test_compositor_vanish_only_with_plate_and_flag():
     assert comp.render(frame, mask, plate, 0.03) is frame
     assert comp.render(frame, mask, None, 0.03, vanish=True) is frame
     assert (comp.render(frame, mask, plate, 0.03, vanish=True) == 100).all()
-
-
-def test_background_brightness_uses_only_background_pixels():
-    live, plate = solid(120), solid(100)
-    mask = np.zeros((36, 64), np.float32)
-    mask[:, :32] = 1.0
-    live[:, :32] = 0  # person region must not count
-    result = background_brightness(live, plate, mask)
-    assert result == pytest.approx((120.0, 100.0, 0.5))
-    assert background_brightness(live, plate, np.ones((36, 64), np.float32)) is None

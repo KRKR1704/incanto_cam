@@ -178,19 +178,3 @@ class PlateCapture:
         if self.state == self.ABORTED and now - self._phase_start < 6.0:
             return self.abort_reason, True
         return None
-
-
-def background_brightness(live_small: np.ndarray, plate_small: np.ndarray,
-                          mask_small: np.ndarray, bg_threshold: float = 0.05,
-                          min_fraction: float = 0.02) -> tuple[float, float, float] | None:
-    """Mean brightness (0-255) of live vs plate over background pixels (outside the person mask).
-
-    Returns (live_mean, plate_mean, background_fraction), or None if too little background is visible.
-    A lasting difference means the camera re-exposed after you stepped in, so a vanished frame would
-    show a brightness seam. Measured only; correcting it is task 8.5.
-    """
-    bg = mask_small < bg_threshold
-    fraction = float(bg.mean())
-    if fraction < min_fraction:
-        return None
-    return float(live_small[bg].mean()), float(plate_small[bg].mean()), fraction

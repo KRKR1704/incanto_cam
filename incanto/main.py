@@ -17,11 +17,11 @@ from incanto.io.camera import (EXPOSURE_MAX, EXPOSURE_MIN, Camera, CameraError, 
                                install_exit_guard)
 from incanto.io.vcam import VCamError, VirtualCamera
 from incanto.perception.hands import HandsWorker, HandTracker
-from incanto.plate.clean_plate import (PlateCapture, background_brightness, load_plate, make_plate,
-                                       save_plate)
+from incanto.plate.clean_plate import (PlateCapture, load_plate, make_plate, save_plate)
 from incanto.perception.segmenter import Segmenter
 from incanto.render import overlay
 from incanto.render.compositor import Compositor
+from incanto.render.vanish_mask import VanishMask
 from incanto.utils import winperf
 from incanto.utils.evidence import EvidenceSession, grab_vcam_frames
 from incanto.utils.fps import FpsCounter, StageTimer
@@ -30,7 +30,6 @@ from incanto.utils.logging import setup_logging
 
 log = logging.getLogger("incanto")
 PREVIEW_WINDOW = "Incanto preview (Q quit, D debug HUD, B capture plate, V vanish)"
-BRIGHTNESS_SIZE = (160, 90)  # background brightness comparison is done on tiny frames
 FPS_LOG_INTERVAL_S = 5.0
 
 
@@ -98,7 +97,8 @@ def reset_camera(config_path: str | None) -> int:
 def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         lock_exposure: float | None = None, perf_tweaks: bool = True,
         segment_every: int | None = None, evidence_dir: str | None = None,
-        capture_mode: str | None = None, shots_dir: str | None = None) -> int:
+        capture_mode: str | None = None, shots_dir: str | None = None,
+        mask_mode: str | None = None, vanish_on_start: bool = False) -> int:
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
@@ -107,6 +107,9 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
     if segment_every is not None:
         cfg = dataclasses.replace(
             cfg, perception=dataclasses.replace(cfg.perception, segment_every_n=segment_every))
+
+    if mask_mode is not None:
+        cfg = dataclasses.replace(cfg, vanish=dataclasses.replace(cfg.vanish, mask_mode=mask_mode))
 
     if capture_mode is not None:
         cfg = dataclasses.replace(cfg, video=dataclasses.replace(cfg.video, capture_mode=capture_mode))
@@ -149,7 +152,10 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         hands = HandsWorker(tracker) if p.hands_async else tracker
         segmenter = Segmenter(seg_model, out_size, blur_px=p.mask_blur_px,
                               feather_low=p.mask_feather_low, feather_high=p.mask_feather_high,
-                              temporal_alpha=p.mask_temporal_alpha, every_n=p.segment_every_n)
+                              temporal_alpha=p.mask_temporal_alpha, every_n=p.segment_every_n,
+                              temporal_mode=p.mask_temporal, release_decay=p.mask_release_decay)
+        sw = min(cfg.video.perception_width, cam.width)  # perception frame size, as downscale() makes it
+        vmask = VanishMask(cfg.vanish, out_size, (sw, max(1, round(cam.height * sw / cam.width))))
         compositor = Compositor()
         plate_dir = cfg.plate.resolve_dir()
         plate = load_plate(plate_dir, cam.width, cam.height)
@@ -163,12 +169,14 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
             log.info("No usable plate in %s: press B (with the preview focused) to capture one.", plate_dir)
         capture = PlateCapture(cfg.plate.frames, cfg.plate.countdown_s, cfg.plate.settle_s,
                                cfg.plate.max_person_coverage)
-        vanish_on = False
+        vanish_on = bool(vanish_on_start and plate)  # headless timing runs: start with vanish already on
         shots = Path(shots_dir) if shots_dir else None  # local-only evidence images (gitignored)
         if shots:
             shots.mkdir(parents=True, exist_ok=True)
-        plate_small = None       # tiny plate for the brightness comparison
-        bright_sums = [0.0, 0.0, 0.0, 0]  # live, plate, background fraction, samples (while V is on)
+        shot_no = 0
+        vresult = None           # latest VanishResult, for the debug view
+        if plate:
+            vmask.set_plate(plate.u8)
         status_msg, status_until = "", 0.0
         log.info("Perception ready: perception_width=%d, hands=%d (%s), segment every %d frame(s), preview every %d frame(s)",
                  cfg.video.perception_width, p.num_hands, "async thread" if p.hands_async else "inline",
@@ -187,7 +195,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         frames = frames_since_log = 0
         hud_on = True
         last_stage_ms: dict[str, float] = {}
-        log.info("Running. Q quits, D toggles the debug HUD, B captures a clean plate, V toggles vanish (preview only).")
+        log.info("Running. Q quits, D toggles the debug HUD, B captures a clean plate, V toggles vanish (applied to the vcam output too; "
+                 "B/V/D/S/Q are read from the preview window). mask_mode=%s", cfg.vanish.mask_mode)
 
         while True:
             frame = cam.read(timer)
@@ -228,23 +237,16 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                         log.error("Plate captured but could not be saved: %s", exc)
                     if shots:
                         cv2.imwrite(str(shots / "plate.png"), plate.u8)
-                    plate_small = None
+                    vmask.set_plate(plate.u8)
                     capture.state = capture.IDLE
                     status_msg, status_until = "Plate captured. Press V to vanish.", now + 4.0
-            out = compositor.render(frame, mask, plate.u8 if plate else None, dt,
-                                    vanish=vanish_on and not capture.active)
-            if vanish_on and plate and frames_since_log % 3 == 0:
-                # Lighting check: live vs plate brightness over background pixels (outside the mask).
-                if plate_small is None:
-                    plate_small = cv2.resize(plate.u8, BRIGHTNESS_SIZE, interpolation=cv2.INTER_AREA)
-                bg = background_brightness(cv2.resize(frame, BRIGHTNESS_SIZE, interpolation=cv2.INTER_AREA),
-                                           plate_small, cv2.resize(mask, BRIGHTNESS_SIZE,
-                                                                   interpolation=cv2.INTER_AREA))
-                if bg:
-                    bright_sums[0] += bg[0]
-                    bright_sums[1] += bg[1]
-                    bright_sums[2] += bg[2]
-                    bright_sums[3] += 1
+            vresult = None
+            if vanish_on and plate and not capture.active:
+                vresult = vmask.compute(small, segmenter.small, hand_list, timer)
+                with timer.stage("composite"):
+                    out = compositor.render(frame, vresult.mask, vresult.plate, dt, vanish=True)
+            else:
+                out = frame
             with timer.stage("vcam"):
                 vcam.send(out)  # clean frame: no debug drawing ever reaches the virtual camera
             fps_counter.tick()
@@ -255,7 +257,9 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 t_preview = time.perf_counter()
                 preview = out.copy()  # all debug drawing happens on this copy only
                 if hud_on:
-                    overlay.draw_debug(preview, mask, hand_list, last_stage_ms)
+                    if vresult is not None:
+                        overlay.draw_vanish_sources(preview, vresult)
+                    overlay.draw_debug(preview, None if vresult is not None else mask, hand_list, last_stage_ms)
                 overlay.draw_fps(preview, fps_counter.fps)
                 state_line = ("VANISH ON" if vanish_on else "vanish off") + (
                     " | plate: ready" if plate else " | plate: none (press B)")
@@ -292,9 +296,12 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                         capture.start(now)
                 if key in (ord("s"), ord("S")):
                     if shots:
-                        name = "vanished.png" if vanish_on else "live-with-me.png"
-                        cv2.imwrite(str(shots / name), out)  # the exact frame sent to the vcam: no HUD
-                        log.info("Saved vcam-output screenshot (local-only): %s", shots / name)
+                        shot_no += 1
+                        stem = f"vanished-{cfg.vanish.mask_mode}-{shot_no}" if vanish_on else f"live-with-me-{shot_no}"
+                        cv2.imwrite(str(shots / f"{stem}.png"), out)  # the exact frame sent to the vcam: no HUD
+                        cv2.imwrite(str(shots / f"{stem}-preview.png"), preview)  # with the debug view as shown
+                        log.info("Saved screenshots (local-only): %s.png (vcam output) and %s-preview.png",
+                                 shots / stem, stem)
                     else:
                         log.info("Start with --shots-dir DIR to use S for screenshots.")
                 if key in (ord("v"), ord("V")):
@@ -305,7 +312,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                         status_msg, status_until = "No plate yet: press B first", now + 3.0
                     else:
                         vanish_on = not vanish_on
-                        bright_sums[:] = [0.0, 0.0, 0.0, 0]
+                        vmask.stats.reset()
                         log.info("Vanish %s", "ON" if vanish_on else "OFF")
                 if key in (ord("d"), ord("D")):
                     hud_on = not hud_on
@@ -342,15 +349,20 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 log.info("camera: exposure=%s (our setting; driver readback is unreliable) | power=%s",
                          "auto" if exposure is None else f"{exposure:.0f} manual", winperf.power_source())
                 if vanish_on:
-                    n = bright_sums[3]
-                    if n:
-                        live_b, plate_b, frac = (bright_sums[i] / n for i in range(3))
-                        log.info("vanish lighting: background brightness live %.1f vs plate %.1f -> diff (live-plate) "
-                                 "%+.1f | background pixels %.0f%% of frame | %d samples", live_b, plate_b,
-                                 live_b - plate_b, frac * 100, n)
+                    st = vmask.stats
+                    if st.n:
+                        n = st.n
+                        g = st.gain / n
+                        log.info("vanish lighting [%s match]: background live %.1f | plate raw %.1f (diff %+.1f) -> "
+                                 "matched %.1f (residual diff %+.1f) | gain BGR %.2f/%.2f/%.2f offset %+.1f/%+.1f/%+.1f "
+                                 "| background %.0f%% of frame | plate-diff mask used %d, skipped %d frames",
+                                 cfg.vanish.plate_match, st.live / n, st.raw_plate / n,
+                                 (st.live - st.raw_plate) / n, st.matched_plate / n,
+                                 (st.live - st.matched_plate) / n, *g, *(st.offset / n),
+                                 st.fraction / n * 100, st.diff_frames, st.diff_skipped)
                     else:
                         log.info("vanish lighting: not enough visible background to compare")
-                    bright_sums[:] = [0.0, 0.0, 0.0, 0]
+                    vmask.stats.reset()
                 timer.reset()
                 last_log, frames_since_log = now, 0
             if max_seconds is not None and now - start >= max_seconds:
@@ -402,6 +414,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="override video.capture_mode from config.yaml")
     parser.add_argument("--evidence", metavar="DIR",
                         help="guided capture of 3 preview screenshots + virtual camera frames into DIR")
+    parser.add_argument("--mask-mode", choices=("seg_only", "seg_hands", "full"),
+                        help="override vanish.mask_mode from config.yaml (A/B the vanish mask sources)")
+    parser.add_argument("--vanish-on-start", action="store_true",
+                        help="start with vanish ON when a saved plate exists (for headless timing runs)")
     parser.add_argument("--shots-dir", metavar="DIR",
                         help="local-only evidence: S saves the clean vcam frame here (vanished.png when V is on, "
                              "else live-with-me.png); plate.png is saved on each plate capture")
@@ -414,7 +430,8 @@ def main(argv: list[str] | None = None) -> int:
         return show_camera_settings(args.config)
     return run(args.config, args.seconds, not args.no_preview, args.lock_exposure,
                not args.no_perf_tweaks, args.segment_every, args.evidence, args.capture_mode,
-               args.shots_dir)
+               args.shots_dir, args.mask_mode,
+               args.vanish_on_start)
 
 
 if __name__ == "__main__":
