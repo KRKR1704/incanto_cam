@@ -84,12 +84,12 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 
 | ID | Task | Depends on | Est. | Done |
 |---|---|---|---|---|
-| 3.1 | `plate/clean_plate.py`: capture N frames (default 30) and average them into a plate | 1.5 | 15m | [ ] |
-| 3.2 | Hotkey `B`: 3-second on-screen countdown in the preview, then capture | 3.1 | 10m | [ ] |
-| 3.3 | Check during capture: warn if the segmenter still sees a person in the frame | 2.2, 3.1 | 10m | [ ] |
-| 3.4 | Save/load the plate to `plates/` (gitignored, local-only: it is a photo of the room) so it survives restarts (invalidated if the resolution changes) | 3.1 | 10m | [ ] |
-| 3.5 | `render/compositor.py`: `composite(frame, mask, plate)` replaces masked pixels with plate pixels | 2.4, 3.1 | 10m | [ ] |
-| 3.6 | Debug hotkey `V`: toggle instant vanish using the compositor | 3.5 | 5m | [ ] |
+| 3.1 | `plate/clean_plate.py`: capture N frames (default 30) and average them into a plate | 1.5 | 15m | [x] |
+| 3.2 | Hotkey `B`: 3-second on-screen countdown in the preview, then capture | 3.1 | 10m | [x] |
+| 3.3 | Check during capture: warn if the segmenter still sees a person in the frame | 2.2, 3.1 | 10m | [x] |
+| 3.4 | Save/load the plate to `plates/` (gitignored, local-only: it is a photo of the room) so it survives restarts (invalidated if the resolution changes) | 3.1 | 10m | [x] |
+| 3.5 | `render/compositor.py`: `composite(frame, mask, plate)` replaces masked pixels with plate pixels | 2.4, 3.1 | 10m | [x] |
+| 3.6 | Debug hotkey `V`: toggle instant vanish using the compositor | 3.5 | 5m | [x] |
 | 3.7 | Camera safety net: restore auto exposure on any exit (try/finally, atexit, signals, console close) when it was set manual; `--reset-camera` command | 1.2 | 20m | [x] |
 
 **Phase gate:** Pressing `V` makes you disappear with no visible hole or ghosting, live in Meet. Save before/after screenshots (local-only).
@@ -178,7 +178,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 8.2 | Hotkey help overlay (`H`): B plate, R record, V vanish test, C cancel, D debug, Q quit | 8.1 | 10m | [ ] |
 | 8.3 | Graceful errors: no camera, no virtual camera driver (with a link to the OBS install), mic unavailable (falls back to visual-only gestures) | 1.2, 1.3, 4.1 | 25m | [ ] |
 | 8.4 | Warn when no clean plate exists and a plate-dependent spell is triggered | 3.4, 6.3 | 10m | [ ] |
-| 8.5 | Exposure drift check: compare the plate to live background edges, prompt to recapture if they drift too far | 3.4 | 25m | [ ] |
+| 8.5 | Exposure drift check: compare the plate to live background edges, prompt to recapture if they drift too far | 3.4 | 25m | [x] |
 | 8.6 | Final FPS pass against the §8 budget; profile and fix the slowest stage | all | 30m | [ ] |
 | 8.7 | README: setup, OBS note, hotkeys, gesture → spell table, adding spells. No demo GIF/video of the user in the repo (host it outside GitHub, or use non-personal footage) | 7.6 | 30m | [ ] |
 | 8.8 | PyInstaller build → `dist/Incanto.exe` with MediaPipe model files bundled | 8.6 | 30m | [ ] |
