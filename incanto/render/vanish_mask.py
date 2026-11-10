@@ -1,7 +1,8 @@
 """The mask used to replace the person with the clean plate.
 
 Principle: over-covering is free (the plate IS the background), under-covering reveals the person.
-Three sources are unioned (each can be switched off with `vanish.mask_mode`):
+Three sources are unioned (each can be switched off with `vanish.mask_mode`) into a SOLID core
+(alpha exactly 1.0 wherever any source covers) with the feather only in a ring outside it:
 
 1. the segmenter mask, grown by `dilate_px`;
 2. a filled convex hull of each hand's landmarks, grown by `hand_hull_dilate_px` (the segmentation
@@ -38,7 +39,7 @@ MIN_CELL_PLATE = 10.0   # ...and a plate brighter than this (gain from a black p
 MATCH_EVERY = 2         # brightness is estimated every 2nd frame: it drifts slowly and this halves the cost
 APPLY_EVERY = 4         # the full-resolution matched plate is rebuilt every 4th frame (the gain drifts slowly)
 STATS_EVERY = 2         # background statistics for the log are taken on every 2nd estimate
-ROI_PAD = 4             # perception pixels added around the mask's bounding box
+ROI_PAD = 2             # half-resolution pixels added around the mask's bounding box
 
 
 @dataclass
@@ -69,7 +70,10 @@ class VanishStats:
         self.cells = 0
         self.n = 0
         self.resid_n = 0
-        self.diff_frames = self.diff_skipped = 0
+        self.diff_frames = 0
+        self.guard_frames = self.guard_frames_any = self.guard_cells = 0  # per-cell lighting guard
+        self.seg_empty = 0  # frames where the segmenter found (almost) nobody
+        self.large_blob_frames = 0  # frames where a body-sized difference outside the zone was accepted
 
 
 def _ellipse(radius: int) -> np.ndarray | None:
@@ -106,14 +110,20 @@ class VanishMask:
         self._k_close = _ellipse(round(cfg.plate_diff_close_px * s))
         self._k_margin = _ellipse(max(1, round(cfg.match_margin_px * s / MATCH_STRIDE)))
         self._k_zone = _ellipse(max(1, round(cfg.near_me_px * s / MATCH_STRIDE)))
-        feather = round(cfg.feather_px * s)
-        self._feather = (feather * 2 + 1) if feather > 0 else 0
+        # The core and its feather ring are built at HALF the perception resolution (cheaper; the
+        # result is upsampled anyway), so their sizes are halved here.
+        self._k_core_close = _ellipse(round(cfg.core_close_px * s / 2))
+        self._feather_r = round(cfg.outer_feather_px * s / 2)  # ring width beyond the solid core, in half-res px
+        self._prev_diff: np.ndarray | None = None
+        self._guard_cut: np.ndarray | None = None
+        self._prev_zone: np.ndarray | None = None
         self._cells = (cfg.plate_match_cells_x, cfg.plate_match_cells_y)
         self._plate_u8: np.ndarray | None = None
         self._plate_small: np.ndarray | None = None
         self._frame_no = 0
         self._estimates = 0
         self._matched_full: np.ndarray | None = None
+        self._matched_small: np.ndarray | None = None
         self.stats = VanishStats()
         self._reset_match()
 
@@ -130,6 +140,7 @@ class VanishMask:
         self.grid = np.ones((gy, gx, 3), np.float32)  # gain_map mode
         self._have_match = False
         self._matched_full = None
+        self._matched_small = None
 
     def _apply(self, plate: np.ndarray, roi: tuple[int, int, int, int] | None = None) -> np.ndarray:
         """The plate with the current brightness/colour correction. `roi` = (x0, y0, x1, y1) in the
@@ -291,32 +302,146 @@ class VanishMask:
             cv2.fillConvexPoly(canvas, cv2.convexHull(pts), 255)
         if hands and self._k_hull is not None:
             canvas = cv2.dilate(canvas, self._k_hull)
-        if hands and self._feather:
-            canvas = cv2.GaussianBlur(canvas, (self._feather, self._feather), 0)
         return canvas.astype(np.float32) * (1.0 / 255.0)
 
     def _near_me_zone(self, covered: np.ndarray) -> np.ndarray:
-        """Soft 0..1 zone (perception res): the covered area dilated by `near_me_px`."""
+        """Soft 0..1 zone (perception res): the covered area dilated by `near_me_px`, released slowly
+        so a one-frame segmenter dropout does not shrink it."""
         sub = (covered[::MATCH_STRIDE, ::MATCH_STRIDE] > COVERED).astype(np.uint8)
         zone = cv2.dilate(sub, self._k_zone) if self._k_zone is not None else sub
-        return cv2.resize(zone.astype(np.float32), self.small_size, interpolation=cv2.INTER_LINEAR)
+        zone = cv2.resize(zone.astype(np.float32), self.small_size, interpolation=cv2.INTER_LINEAR)
+        if self._prev_zone is not None:
+            zone = np.maximum(zone, self._prev_zone * self.cfg.plate_diff_release_decay)
+            zone[zone < 0.02] = 0.0
+        self._prev_zone = zone
+        return zone
 
-    def _diff_mask(self, small: np.ndarray, plate_matched_small: np.ndarray,
-                   zone: np.ndarray) -> np.ndarray | None:
-        gray = cv2.cvtColor(cv2.absdiff(small, plate_matched_small), cv2.COLOR_BGR2GRAY)
-        gray = cv2.blur(gray, (3, 3))
-        binary = (gray > self.cfg.plate_diff_threshold).astype(np.uint8) * 255
+    def _difference(self, small: np.ndarray, plate_small: np.ndarray) -> np.ndarray:
+        """uint8 |live - matched plate| by the configured metric (levels, 0-255)."""
+        metric = self.cfg.plate_diff_metric
+        if metric == "gray":
+            d = cv2.cvtColor(cv2.absdiff(small, plate_small), cv2.COLOR_BGR2GRAY)
+        elif metric == "max_channel":
+            b, g, r = cv2.split(cv2.absdiff(small, plate_small))  # colour-aware: similar brightness, other colour
+            d = cv2.max(cv2.max(b, g), r)
+        else:  # lab: lightness half-weighted, chroma full weight
+            a = cv2.cvtColor(small, cv2.COLOR_BGR2LAB).astype(np.float32)
+            b_ = cv2.cvtColor(plate_small, cv2.COLOR_BGR2LAB).astype(np.float32)
+            dd = a - b_
+            d = np.clip(np.sqrt(0.5 * dd[..., 0] ** 2 + dd[..., 1] ** 2 + dd[..., 2] ** 2), 0, 255).astype(np.uint8)
+        return cv2.blur(d, (3, 3))
+
+    def _cell_guard(self, small: np.ndarray, plate_small: np.ndarray, binary: np.ndarray,
+                    covered: np.ndarray) -> np.ndarray:
+        """Per grid cell: drop the difference where it is just a lighting wash the gain map missed.
+
+        A cell is a wash if most of its uncovered pixels differ AND one neutral, plausible gain
+        (live ~= gain * plate, equal across channels, 0.6-1.6) explains it to within a few levels:
+        a person never keeps the plate's texture under a single neutral gain. Counted in stats."""
+        cfg, st = self.cfg, self.stats
+        st.guard_frames += 1
+        if st.guard_frames % 2 == 0 and self._guard_cut is not None:  # lighting changes slowly: every 2nd frame
+            return binary * (1 - self._guard_cut) if self._guard_cut.any() else binary
+        self._guard_cut = None
+        sub = (slice(None, None, MATCH_STRIDE), slice(None, None, MATCH_STRIDE))
+        flag = binary[sub] > 0
+        unc = covered[sub] <= COVERED
+        cand = flag & unc
+        if not cand.any():
+            self._guard_cut = np.zeros(self.small_size[::-1], np.uint8)
+            return binary
+        gx, gy = self._cells
+
+        def area(a):
+            return cv2.resize(a, (gx, gy), interpolation=cv2.INTER_AREA)
+
+        live, plate = small[sub].astype(np.float32), plate_small[sub].astype(np.float32)
+        uf, cf = unc.astype(np.float32), cand.astype(np.float32)
+        unc_frac, cand_frac = area(uf), area(cf)
+        gain = np.clip(area(live * uf[..., None]) / np.maximum(area(plate * uf[..., None]), 1e-3), *GAIN_LIMITS)
+        gain_px = cv2.resize(gain.astype(np.float32), (live.shape[1], live.shape[0]), interpolation=cv2.INTER_NEAREST)
+        resid_px = np.abs(live - plate * gain_px).max(axis=2)
+        resid = area(resid_px * cf) / np.maximum(cand_frac, 1e-6)
+        wash = cand_frac / np.maximum(unc_frac, 1e-6)
+        neutral = gain.max(axis=2) / np.maximum(gain.min(axis=2), 1e-3) < 1.2
+        plausible = (gain.mean(axis=2) > 0.6) & (gain.mean(axis=2) < 1.6)
+        suppress = ((unc_frac >= 0.2) & (wash > cfg.plate_diff_wash_fraction)
+                    & (resid < cfg.plate_diff_wash_residual) & neutral & plausible)
+        n = int(suppress.sum())
+        cut = cv2.resize(suppress.astype(np.uint8), self.small_size, interpolation=cv2.INTER_NEAREST)
+        self._guard_cut = cut
+        if n == 0:
+            return binary
+        st.guard_cells += n
+        st.guard_frames_any += 1
+        return binary * (1 - cut)
+
+    def _large_blobs(self, binary: np.ndarray, zone: np.ndarray) -> np.ndarray | None:
+        """Connected differences at least `plate_diff_large_blob_fraction` of the frame (body-sized)."""
+        frac = self.cfg.plate_diff_large_blob_fraction
+        if frac <= 0:
+            return None
+        sub = binary[::4, ::4]  # body-sized blobs survive a 4x decimation
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(sub, connectivity=8)
+        if n <= 1:
+            return None
+        big = [i for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= frac * sub.size]
+        if not big:
+            return None
+        keep = np.isin(labels, big).astype(np.uint8)
+        large = cv2.resize(keep, self.small_size, interpolation=cv2.INTER_NEAREST).astype(np.float32)
+        if float(((large > 0) & (zone < 0.5))[::4, ::4].mean()) > 0.005:  # beyond the zone by > 0.5% of the frame
+            self.stats.large_blob_frames += 1
+        return large
+
+    def _diff_mask(self, small: np.ndarray, plate_small: np.ndarray, zone: np.ndarray,
+                   covered: np.ndarray) -> np.ndarray:
+        cfg = self.cfg
+        binary = (self._difference(small, plate_small) > cfg.plate_diff_threshold).astype(np.uint8) * 255
         if self._k_open is not None:
             binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, self._k_open)
         if self._k_close is not None:
             binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, self._k_close)
-        if float((binary > 0).mean()) > self.cfg.plate_diff_max_fraction:
-            self.stats.diff_skipped += 1  # most of the frame differs: a lighting change, not a person
-            return None
+        if cfg.plate_diff_cell_guard:
+            binary = self._cell_guard(small, plate_small, binary, covered)
+        allowed = zone  # near me; moved objects elsewhere stay live...
+        large = self._large_blobs(binary, zone)
+        if large is not None:  # ...unless the difference is body-sized (a segmenter dropout must not expose me)
+            allowed = np.maximum(zone, large)
+        cur = binary.astype(np.float32) * (1.0 / 255.0) * allowed
+        if self._prev_diff is not None:  # fast attack, slow release
+            cur = np.maximum(cur, self._prev_diff * cfg.plate_diff_release_decay)
+            cur[cur < 0.02] = 0.0
+        self._prev_diff = cur
         self.stats.diff_frames += 1
-        if self._feather:
-            binary = cv2.GaussianBlur(binary, (self._feather, self._feather), 0)
-        return binary.astype(np.float32) * (1.0 / 255.0) * zone  # only near me: moved objects elsewhere stay live
+        return cur
+
+    def _solid_core_alpha(self, union: np.ndarray) -> np.ndarray:
+        """alpha == 1.0 wherever any source covers; the feather lives only in a ring OUTSIDE that core.
+
+        Built at half resolution. The ring starts one half-pixel beyond the core so that the bilinear
+        upsampling cannot pull alpha below 1.0 at the core's edge."""
+        h2, w2 = union.shape[0] // 2, union.shape[1] // 2
+        u = np.maximum(np.maximum(union[0:2 * h2:2, 0:2 * w2:2], union[1:2 * h2:2, 0:2 * w2:2]),
+                       np.maximum(union[0:2 * h2:2, 1:2 * w2:2], union[1:2 * h2:2, 1:2 * w2:2]))  # 2x2 max-pool
+        core = (u > self.cfg.core_threshold).astype(np.uint8)
+        if self._k_core_close is not None:
+            core = cv2.morphologyEx(core, cv2.MORPH_CLOSE, self._k_core_close)
+        if not core.any() or self._feather_r <= 0:
+            return core.astype(np.float32)
+        dist = cv2.distanceTransform(1 - core, cv2.DIST_L2, 3)  # 0 inside the core, grows outward
+        a = np.clip(1.0 - np.maximum(dist - 1.0, 0.0) / float(self._feather_r), 0.0, 1.0)
+        return a * a * (3.0 - 2.0 * a)
+
+    def reset_temporal(self) -> None:
+        """Forget the previous frames' difference mask and zone (call when vanish is switched on)."""
+        self._prev_diff = self._prev_zone = self._guard_cut = None
+
+    def matched_plate_full(self) -> np.ndarray:
+        """The full-resolution brightness-matched plate (what the vanished pixels are drawn from)."""
+        if self._matched_full is None:
+            self._matched_full = self._apply(self._plate_u8)
+        return self._matched_full
 
     def compute(self, small: np.ndarray, seg_small: np.ndarray, hands: list[Hand],
                 timer=None) -> VanishResult:
@@ -332,8 +457,13 @@ class VanishMask:
         def stage(name):
             return timer.stage(name) if timer else nullcontext()
 
+        if float((seg_small[::4, ::4] > 0.5).mean()) < 0.02:
+            self.stats.seg_empty += 1  # dropout: the other sources must carry the mask
         with stage("vm_seg"):
-            grown = cv2.dilate(seg_small, self._k_grow) if self._k_grow is not None else seg_small
+            if self._k_grow is not None:  # dilate in uint8: 4x faster than float32 with an elliptical kernel
+                grown = cv2.dilate((seg_small * 255.0).astype(np.uint8), self._k_grow).astype(np.float32) * (1.0 / 255.0)
+            else:
+                grown = seg_small
         zeros = np.zeros_like(seg_small)
         with stage("vm_hands"):
             hull = self._hull_mask(hands) if cfg.mask_mode in ("seg_hands", "full") else zeros
@@ -342,29 +472,31 @@ class VanishMask:
         with stage("vm_match"):
             if self._frame_no % MATCH_EVERY == 0:
                 self._estimate_match(small, covered)  # always measured; applied unless plate_match is off
+            if self._matched_small is None or self._frame_no % MATCH_EVERY == 0:
+                self._matched_small = self._apply(self._plate_small)  # changes only when the estimate does
             self._frame_no += 1
-            plate_small = self._apply(self._plate_small)
+            plate_small = self._matched_small
         with stage("vm_diff"):
-            zone = self._near_me_zone(covered) if cfg.mask_mode == "full" else zeros
-            diff = self._diff_mask(small, plate_small, zone) if cfg.mask_mode == "full" else None
-            if diff is None:
-                diff = zeros
-        mask_small = np.maximum(covered, diff) if cfg.mask_mode == "full" else covered
+            if cfg.mask_mode == "full":
+                zone = self._near_me_zone(covered)
+                diff = self._diff_mask(small, plate_small, zone, covered)
+            else:
+                zone = diff = zeros
+        with stage("vm_core"):
+            alpha = self._solid_core_alpha(np.maximum(covered, diff))
         # Everything at full resolution happens only inside the bounding box of the mask.
         with stage("vm_up"):
-            ys, xs = np.nonzero(mask_small[::2, ::2] > 0.003)
+            ys, xs = np.nonzero(alpha > 0.003)
             if len(xs) == 0:
                 return VanishResult(zeros[:0, :0], self._plate_u8[:0, :0], None, seg_small, grown, hull, diff, zone)
-            sh, sw = mask_small.shape
-            x0, x1 = max(0, int(xs.min()) * 2 - ROI_PAD), min(sw, int(xs.max()) * 2 + 2 + ROI_PAD)
-            y0, y1 = max(0, int(ys.min()) * 2 - ROI_PAD), min(sh, int(ys.max()) * 2 + 2 + ROI_PAD)
+            sh, sw = alpha.shape
+            x0, x1 = max(0, int(xs.min()) - ROI_PAD), min(sw, int(xs.max()) + 1 + ROI_PAD)
+            y0, y1 = max(0, int(ys.min()) - ROI_PAD), min(sh, int(ys.max()) + 1 + ROI_PAD)
             ow, oh = self.out_size
             fx, fy = ow / sw, oh / sh
-            roi = (int(x0 * fx), int(y0 * fy), min(ow, int(np.ceil(x1 * fx))), min(oh, int(np.ceil(y1 * fy))))
-            # upscale just that window of the small mask, aligned to the full-resolution pixel grid
-            m = np.float32([[1 / fx, 0, 0.5 / fx - 0.5 + roi[0] / fx], [0, 1 / fy, 0.5 / fy - 0.5 + roi[1] / fy]])
-            mask = cv2.warpAffine(mask_small, m, (roi[2] - roi[0], roi[3] - roi[1]),
-                                  flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
+            roi = (round(x0 * fx), round(y0 * fy), min(ow, round(x1 * fx)), min(oh, round(y1 * fy)))
+            mask = cv2.resize(np.ascontiguousarray(alpha[y0:y1, x0:x1]), (roi[2] - roi[0], roi[3] - roi[1]),
+                              interpolation=cv2.INTER_LINEAR)
         with stage("vm_plate"):
             if self._matched_full is None or self._frame_no % APPLY_EVERY == 0:
                 self._matched_full = self._apply(self._plate_u8)
