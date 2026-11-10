@@ -15,11 +15,12 @@ import psutil
 from incanto.config import ConfigError, load_config
 from incanto.io.camera import (EXPOSURE_MAX, EXPOSURE_MIN, Camera, CameraError, ThreadedCamera,
                                install_exit_guard)
+from incanto.io.exposure_lock import ExposureLock
 from incanto.io.sounds import SoundCues
 from incanto.io.vcam import VCamError, VirtualCamera
 from incanto.perception.hands import HandsWorker, HandTracker
 from incanto.plate.clean_plate import (PlateCapture, load_plate, make_plate, save_plate)
-from incanto.plate.health import HealthLimits
+from incanto.plate.health import HealthLimits, HealthMonitor
 from incanto.perception.segmenter import Segmenter
 from incanto.render import overlay
 from incanto.render.compositor import Compositor
@@ -177,15 +178,25 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         capture = PlateCapture(cfg.plate.frames, cfg.plate.countdown_s, cfg.plate.settle_s,
                                cfg.plate.max_person_coverage)
         cues = SoundCues(cfg.plate.sounds)
-        limits = HealthLimits(cfg.plate.health_max_raw_diff, cfg.plate.health_gain_min,
-                              cfg.plate.health_gain_max, cfg.plate.health_max_cell_gain)
+        pc = cfg.plate
+        limits = HealthLimits(pc.health_max_residual, pc.health_min_structure, pc.health_gain_min,
+                              pc.health_gain_max, pc.health_min_cell_background, pc.health_hysteresis)
+        monitor = HealthMonitor(pc.health_fail_s)  # latest verdict, hysteresis, sustained-failure timer
+        health_at = -1e9
         vanish_on = False
         # V (or --vanish-on-start, for headless timing runs) only asks; the health check decides.
         want_vanish = bool(vanish_on_start and plate)
         previous_session = plate is not None  # a loaded plate is flagged until it passes a health check
-        health = None             # latest PlateHealth verdict for the current plate (None = not judged yet)
-        health_at = -1e9
-        unhealthy_since = None
+
+        def set_camera_exposure(value: float | None) -> None:  # None = auto; used by the exposure lock
+            if threaded:
+                cam.request_auto_exposure() if value is None else cam.request_exposure(value)
+            else:
+                cam.set_auto_exposure() if value is None else cam.set_exposure(value)
+
+        # Exposure lock only when the camera runs on auto: a manual exposure from the config is already fixed.
+        lock = (ExposureLock(set_camera_exposure, pc.lock_exposure_tolerance, pc.lock_exposure_settle_s)
+                if pc.lock_exposure and exposure is None else None)
         shots = Path(shots_dir) if shots_dir else None  # local-only evidence images (gitignored)
         if shots:
             shots.mkdir(parents=True, exist_ok=True)
@@ -257,60 +268,74 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     capture.state = capture.IDLE
                     status_msg, status_until = "Plate captured. Press V to vanish.", now + 4.0
                     cues.play("ok")
-                    previous_session, health, health_at, unhealthy_since = False, None, -1e9, None
+                    previous_session, health_at = False, -1e9
+                    monitor.reset()
+                    if lock:
+                        lock.start(now)
+                elif capture.state == capture.ABORTED and lock:
+                    lock.restore()  # the old plate (if any) stays in use, and so does its exposure
             for cue in capture.pop_events():
                 cues.play(cue)
+            if lock and lock.sweeping:
+                # the room is normally still empty; background-only brightness also works if you walk back in
+                gain = vmask.background_gain(small, segmenter.small, hand_list) if segmenter.small is not None else None
+                if lock.update(gain, now):
+                    status_msg = (f"Exposure locked at {lock.value:g}. Press V to vanish." if lock.value is not None
+                                  else "Exposure stays on auto. Press V to vanish.")
+                    status_until, health_at = now + 4.0, -1e9
 
-            # Plate health: checked every health_check_s whenever a plate exists, and at once when
-            # vanish is asked for. A plate that does not match the room never reaches the output.
-            if plate and not capture.active and segmenter.small is not None and (
-                    want_vanish or now - health_at >= cfg.plate.health_check_s):
+            # Plate health, judged after gain matching: checked every health_check_s whenever a plate
+            # exists, and at once when vanish is asked for. Not during the exposure sweep (the picture is
+            # deliberately too dark or too bright then); a V pressed meanwhile waits for it.
+            if plate and not capture.active and segmenter.small is not None and not (lock and lock.sweeping) and (
+                    want_vanish or now - health_at >= pc.health_check_s):
                 health_at = now
                 with timer.stage("health"):
-                    checked = vmask.check_health(small, segmenter.small, hand_list, limits)
+                    checked = vmask.check_health(small, segmenter.small, hand_list, limits,
+                                                 recovering=monitor.recovering)
+                was_ok = monitor.ok
+                changed = monitor.update(checked, now)
                 if checked is not None:
-                    changed = health is None or checked.ok != health.ok
-                    health = checked
-                    if health.ok:
-                        unhealthy_since = None
+                    if monitor.ok:
                         if previous_session:
                             previous_session = False
-                            log.info("Plate from a previous session passed the health check: %s", health.describe())
+                            log.info("Plate from a previous session passed the health check: %s", checked.describe())
                         elif changed:
-                            log.info("Plate health: %s", health.describe())
+                            log.info("Plate health: %s", checked.describe())
                     else:
                         if changed:
-                            log.warning("Plate health%s: %s",
+                            log.warning("Plate health%s: %s (vanish switches off if this lasts %.0fs)",
                                         " (plate from a previous session)" if previous_session else "",
-                                        health.describe())
-                        if unhealthy_since is None:
-                            unhealthy_since = now
-                        if vanish_on and now - unhealthy_since >= cfg.plate.health_fail_s:
+                                        checked.describe(), pc.health_fail_s)
+                        if vanish_on and monitor.tripped(now):
                             vanish_on = False
-                            log.warning("Vanish switched OFF: the plate no longer matches the room (%s). "
-                                        "Press B to capture a new plate.", health.describe())
+                            log.warning("Vanish switched OFF: the plate has not matched the room for %.0fs (%s). "
+                                        "Press B to capture a new plate.", pc.health_fail_s, checked.describe())
                             status_msg, status_until = PLATE_MISMATCH, now + 6.0
                             cues.play("error")
                 if want_vanish:
                     want_vanish = False
-                    if checked is None:
+                    # No verdict (you fill the frame): trust the last one if this plate has passed before.
+                    grant = checked.ok if checked is not None else (was_ok and not previous_session)
+                    if grant:
+                        vanish_on = True
+                        vmask.stats.reset()
+                        vmask.reset_temporal()
+                        log.info("Vanish ON (plate health: %s)", checked.describe() if checked else
+                                 "not enough background to re-check; the last check was healthy")
+                    elif checked is None:
                         log.warning("Vanish refused: too little background visible to check the plate against the room.")
                         status_msg, status_until = "Can't check the plate: not enough background visible", now + 4.0
                         cues.play("error")
-                    elif not checked.ok:
+                    else:
                         log.warning("Vanish refused: the plate%s doesn't match the room (%s). Press B to capture a new plate.",
                                     " from a previous session" if previous_session else "", checked.describe())
                         status_msg, status_until = PLATE_MISMATCH, now + 6.0
                         cues.play("error")
-                    else:
-                        vanish_on = True
-                        vmask.stats.reset()
-                        vmask.reset_temporal()
-                        log.info("Vanish ON (plate health: %s)", checked.describe())
             vresult = None
             if vanish_on and plate and not capture.active:
                 vresult = vmask.compute(small, segmenter.small, hand_list, timer)
-                if health is not None and health.ok:  # background refresh, outside the near-me zone only
+                if monitor.ok:  # background refresh, outside the near-me zone only
                     with timer.stage("vm_refresh"):
                         vmask.refresh_plate(frame)
                 with timer.stage("composite"):
@@ -339,7 +364,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 overlay.draw_fps(preview, fps_counter.fps)
                 if not plate:
                     plate_line = "plate: none (press B)"
-                elif health is not None and not health.ok:
+                elif monitor.health is not None and not monitor.health.ok and (not vanish_on or monitor.tripped(now)):
                     plate_line = ("plate from a previous session: " if previous_session else "") + PLATE_MISMATCH
                 elif previous_session:
                     plate_line = "plate: from a previous session (not checked yet)"
@@ -374,8 +399,12 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     if capture.active:
                         capture.cancel()
                         log.info("Plate capture cancelled.")
+                        if lock:
+                            lock.restore()
                     else:
                         vanish_on = want_vanish = False  # capture needs the raw feed; vcam keeps showing it live
+                        if lock:
+                            lock.release()  # back to auto; the countdown and settle time let it adapt
                         capture.start(now)
                 if key in (ord("s"), ord("S")):
                     if shots:
@@ -432,7 +461,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     log.info("hands worker: %.1f Hz, inference %.1f ms, result age %.1f ms (at main-loop use)",
                              hands_hz, hands_ms, averages.get("hands_age", 0.0))
                 log.info("camera: exposure=%s (our setting; driver readback is unreliable) | power=%s",
-                         "auto" if exposure is None else f"{exposure:.0f} manual", winperf.power_source())
+                         (lock.describe() if lock else "auto") if exposure is None else f"{exposure:.0f} manual",
+                         winperf.power_source())
                 if vanish_on:
                     st = vmask.stats
                     if st.n:
@@ -459,7 +489,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                              "the near-me zone + %d px) | paused %d (segmenter saw nobody) | plate health: %s",
                              st.refresh_n, st.refresh_coverage / max(st.refresh_n, 1) * 100,
                              cfg.vanish.plate_refresh_alpha, cfg.vanish.plate_refresh_guard_px, st.refresh_paused,
-                             health.describe() if health else "not judged yet")
+                             monitor.health.describe() if monitor.health else "not judged yet")
                     vmask.stats.reset()
                 timer.reset()
                 last_log, frames_since_log = now, 0
