@@ -24,7 +24,7 @@ See `docs/incanto-project-plan.md` and `docs/incanto-build-tasks.md` for the pla
 
 ## Vanish test (Phase 3)
 
-Hotkeys work in the preview window: **B** captures a clean plate of the empty room (3 s countdown, leave the frame), **V** toggles vanish (applied to the virtual camera output too), **D** debug view, **S** screenshot (with `--shots-dir`), **Q** quit.
+Hotkeys work in the preview window: **B** captures a clean plate of the empty room (3 s countdown, leave the frame), **V** toggles vanish (applied to the virtual camera output too), **D** cycles the debug view (off, source colours, leak view where red shows you leaking through), **S** screenshot (with `--shots-dir`), **Q** quit.
 
 `vanish.mask_mode` in `config.yaml` (or `--mask-mode`) picks what hides you: `seg_only` (segmenter), `seg_hands` (plus filled hand hulls) or `full` (plus pixels that differ from the brightness-matched plate). The plate is a photo of your room and is local-only (`plates/`, gitignored). Recapture it whenever furniture moves: in `full` mode anything that differs from the plate is replaced by the plate's version.
 

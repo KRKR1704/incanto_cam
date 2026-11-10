@@ -91,7 +91,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 3.5 | `render/compositor.py`: `composite(frame, mask, plate)` replaces masked pixels with plate pixels | 2.4, 3.1 | 10m | [x] |
 | 3.6 | Debug hotkey `V`: toggle instant vanish using the compositor | 3.5 | 5m | [x] |
 | 3.7 | Camera safety net: restore auto exposure on any exit (try/finally, atexit, signals, console close) when it was set manual; `--reset-camera` command | 1.2 | 20m | [x] |
-| 3.8 | Vanish mask quality: segment every frame with fast-attack/slow-release smoothing; dilated segmenter mask; filled hand hulls; plate-difference mask; near-me limit on the plate difference; per-channel plate brightness matching with a spatial gain grid; colour-coded debug view; `vanish.mask_mode` seg_only / seg_hands / full | 3.6 | 1.5h | [x] |
+| 3.8 | Vanish mask quality: segment every frame with fast-attack/slow-release smoothing; dilated segmenter mask; filled hand hulls; plate-difference mask; near-me limit on the plate difference; per-channel plate brightness matching with a spatial gain grid; solid-core alpha with the feather only outside it; colour-aware plate difference with fast-attack/slow-release and a per-cell lighting guard; colour-coded source view and a leak view (D cycles off / sources / leak); `vanish.mask_mode` seg_only / seg_hands / full | 3.6 | 2.5h | [x] |
 
 **Phase gate:** Pressing `V` makes you disappear with no visible hole or ghosting, live in Meet. Save before/after screenshots (local-only).
 
@@ -150,6 +150,8 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 6.9 | Hotkey `C`: cancel any spell immediately back to Idle | 6.3 | 5m | [ ] |
 | 6.10 | Render the effect on a replay clip with `--render-out`, review, and tune particle size/speed/stagger | 4.5, 6.8 | 30m | [ ] |
 | 6.11 | Mask fingertip gaps: dilate the mask slightly and union it with a convex hull from the hand landmarks before vanish compositing (the 144x256 segmentation model misses thin fingertips; seen in Phase 2 screenshots) | 6.5, 2.5 | 30m | [x] (done early in 3.8) |
+
+**Note (from the Phase 3 live test):** dust particles must use a strict person-only mask (the raw segmenter, with no dilation and no plate difference), so background objects (such as the chair behind you) do not dissolve. The vanish mask is deliberately larger than you; it must not drive the particles.
 
 **Phase gate:** A screen recording **inside a Meet call** of the full cycle: snap → dissolve → invisible while moving → snap → reassemble, with FPS ≥ 24 throughout (log excerpt). The screen recording is local-only; commit only the log excerpt.
 

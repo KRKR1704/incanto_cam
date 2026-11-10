@@ -29,7 +29,8 @@ from incanto.utils.imaging import downscale
 from incanto.utils.logging import setup_logging
 
 log = logging.getLogger("incanto")
-PREVIEW_WINDOW = "Incanto preview (Q quit, D debug HUD, B capture plate, V vanish)"
+PREVIEW_WINDOW = "Incanto preview (Q quit, D debug view, B capture plate, V vanish)"
+DEBUG_VIEWS = ("off", "sources", "leak")
 FPS_LOG_INTERVAL_S = 5.0
 
 
@@ -98,7 +99,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         lock_exposure: float | None = None, perf_tweaks: bool = True,
         segment_every: int | None = None, evidence_dir: str | None = None,
         capture_mode: str | None = None, shots_dir: str | None = None,
-        mask_mode: str | None = None, vanish_on_start: bool = False) -> int:
+        mask_mode: str | None = None, vanish_on_start: bool = False,
+        debug_view: str = "sources") -> int:
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
@@ -193,7 +195,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         proc.cpu_percent(None)  # prime the counter
         start = last_log = last_frame = time.perf_counter()
         frames = frames_since_log = 0
-        hud_on = True
+        hud_mode = DEBUG_VIEWS.index(debug_view)  # D cycles off -> sources -> leak
         last_stage_ms: dict[str, float] = {}
         log.info("Running. Q quits, D toggles the debug HUD, B captures a clean plate, V toggles vanish (applied to the vcam output too; "
                  "B/V/D/S/Q are read from the preview window). mask_mode=%s", cfg.vanish.mask_mode)
@@ -257,10 +259,15 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
             if show_preview and frames % cfg.preview.every_n == 0:
                 t_preview = time.perf_counter()
                 preview = out.copy()  # all debug drawing happens on this copy only
-                if hud_on:
+                if DEBUG_VIEWS[hud_mode] == "sources":
                     if vresult is not None:
                         overlay.draw_vanish_sources(preview, vresult)
                     overlay.draw_debug(preview, None if vresult is not None else mask, hand_list, last_stage_ms)
+                elif DEBUG_VIEWS[hud_mode] == "leak":
+                    if vresult is not None and vresult.roi:
+                        overlay.draw_leak(preview, out, vresult.plate, vresult.roi)
+                    else:
+                        overlay.draw_status(preview, "Leak view needs vanish ON (press V)", row=1)
                 overlay.draw_fps(preview, fps_counter.fps)
                 state_line = ("VANISH ON" if vanish_on else "vanish off") + (
                     " | plate: ready" if plate else " | plate: none (press B)")
@@ -314,10 +321,11 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     else:
                         vanish_on = not vanish_on
                         vmask.stats.reset()
+                        vmask.reset_temporal()
                         log.info("Vanish %s", "ON" if vanish_on else "OFF")
                 if key in (ord("d"), ord("D")):
-                    hud_on = not hud_on
-                    log.info("Debug HUD %s", "on" if hud_on else "off")
+                    hud_mode = (hud_mode + 1) % len(DEBUG_VIEWS)
+                    log.info("Debug view: %s", DEBUG_VIEWS[hud_mode])
                 if cv2.getWindowProperty(PREVIEW_WINDOW, cv2.WND_PROP_VISIBLE) < 1:
                     log.info("Preview window closed.")
                     break
@@ -357,14 +365,20 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                         log.info("vanish lighting [%s]: background live %.1f | plate raw %.1f (diff %+.1f) -> "
                                  "matched %.1f (diff %+.1f) | per-cell residual mean|r| %.2f signed %+.2f max|r| %.1f "
                                  "(%d cells/frame) | gain BGR %.2f/%.2f/%.2f (cells %.2f..%.2f) offset %+.1f/%+.1f/%+.1f "
-                                 "| background %.0f%% | plate-diff used %d, skipped %d frames",
+                                 "| background %.0f%%",
                                  cfg.vanish.plate_match, st.live / n, st.raw_plate / n,
                                  (st.live - st.raw_plate) / n, st.matched_plate / n,
                                  (st.live - st.matched_plate) / n, st.resid_mean_abs / rn, st.resid_signed / rn,
                                  st.resid_max_abs, st.cells // rn, *g, st.gain_min, st.gain_max,
-                                 *(st.offset / n), st.fraction / n * 100, st.diff_frames, st.diff_skipped)
+                                 *(st.offset / n), st.fraction / n * 100)
                     else:
                         log.info("vanish lighting: not enough visible background to compare")
+                    st = vmask.stats
+                    gf = max(st.guard_frames, 1)
+                    log.info("vanish mask: plate-diff frames %d | cell guard fired in %d of %d frames (%.1f cells when "
+                             "it fired) | body-sized difference accepted outside the zone in %d frames | segmenter "
+                             "empty in %d frames", st.diff_frames, st.guard_frames_any, st.guard_frames,
+                             st.guard_cells / max(st.guard_frames_any, 1), st.large_blob_frames, st.seg_empty)
                     vmask.stats.reset()
                 timer.reset()
                 last_log, frames_since_log = now, 0
@@ -421,6 +435,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="override vanish.mask_mode from config.yaml (A/B the vanish mask sources)")
     parser.add_argument("--vanish-on-start", action="store_true",
                         help="start with vanish ON when a saved plate exists (for headless timing runs)")
+    parser.add_argument("--debug-view", choices=DEBUG_VIEWS, default="sources",
+                        help="initial preview debug view (D cycles off -> sources -> leak)")
     parser.add_argument("--shots-dir", metavar="DIR",
                         help="local-only evidence: S saves the clean vcam frame here (vanished.png when V is on, "
                              "else live-with-me.png); plate.png is saved on each plate capture")
@@ -434,7 +450,7 @@ def main(argv: list[str] | None = None) -> int:
     return run(args.config, args.seconds, not args.no_preview, args.lock_exposure,
                not args.no_perf_tweaks, args.segment_every, args.evidence, args.capture_mode,
                args.shots_dir, args.mask_mode,
-               args.vanish_on_start)
+               args.vanish_on_start, args.debug_view)
 
 
 if __name__ == "__main__":

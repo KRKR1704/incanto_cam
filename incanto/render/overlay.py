@@ -80,6 +80,9 @@ def draw_status(img: np.ndarray, text: str, row: int = 0) -> None:
     _text(img, text, (16, 70 + row * 30), scale=0.7, color=(0, 200, 255))
 
 
+_SOURCE_COLORS = np.array([(0, 0, 0), (0, 255, 0), (255, 128, 0), (0, 255, 255), (0, 0, 255)], np.uint8)  # BGR
+
+
 def draw_vanish_sources(img: np.ndarray, result, strength: float = 0.55) -> None:
     """Colour-code which source covered each pixel of the vanish mask (preview only).
 
@@ -87,22 +90,24 @@ def draw_vanish_sources(img: np.ndarray, result, strength: float = 0.55) -> None
     (only pixels no earlier source covered, so red shows what the plate difference alone adds).
     """
     thr = 0.5
-    seg = result.seg > thr
-    grown = result.grown > thr
-    hull = result.hull > thr
-    diff = result.diff > thr
-    layer = np.zeros((*seg.shape, 3), np.uint8)
-    taken = seg.copy()
-    layer[seg] = (0, 255, 0)
-    for name, m, color in (("hull", hull, (255, 128, 0)), ("grown", grown, (0, 255, 255)),
-                           ("diff", diff, (0, 0, 255))):
-        only = m & ~taken
-        layer[only] = color
-        taken |= m
+    # one label per pixel, assigned lowest priority first so that seg > hull > grow > plate-diff
+    label = np.zeros(result.seg.shape, np.uint8)
+    label[result.diff > thr] = 4
+    label[result.grown > thr] = 3
+    label[result.hull > thr] = 2
+    label[result.seg > thr] = 1
     h, w = img.shape[:2]
-    layer = cv2.resize(layer, (w, h), interpolation=cv2.INTER_NEAREST)
-    covered = layer.any(axis=2)
-    img[covered] = cv2.addWeighted(img, 1 - strength, layer, strength, 0)[covered]
+    x, y, bw, bh = cv2.boundingRect(label)  # blend only inside the box around everything covered
+    if bw > 0:
+        crop = label[y:y + bh, x:x + bw]
+        layer = _SOURCE_COLORS[crop]
+        fx, fy = w / label.shape[1], h / label.shape[0]
+        X0, Y0, X1, Y1 = int(x * fx), int(y * fy), min(w, int((x + bw) * fx)), min(h, int((y + bh) * fy))
+        size = (X1 - X0, Y1 - Y0)
+        layer = cv2.resize(layer, size, interpolation=cv2.INTER_NEAREST)
+        covered = cv2.resize((crop > 0).astype(np.uint8), size, interpolation=cv2.INTER_NEAREST)
+        region = img[Y0:Y1, X0:X1]
+        cv2.copyTo(cv2.addWeighted(region, 1 - strength, layer, strength, 0), covered, region)
     if result.zone.any():  # outline of the "near me" zone: plate difference only counts inside it
         zone = (result.zone > 0.5).astype(np.uint8)
         contours, _ = cv2.findContours(zone, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -111,3 +116,21 @@ def draw_vanish_sources(img: np.ndarray, result, strength: float = 0.55) -> None
             cv2.polylines(img, [(c * (sx, sy)).astype(np.int32)], True, (255, 0, 255), 2, cv2.LINE_AA)
     _text(img, "green seg | yellow grow | blue hands | red plate-diff | magenta = near-me zone",
           (16, img.shape[0] - 46), scale=0.55)
+
+
+def draw_leak(img: np.ndarray, out: np.ndarray, plate_roi: np.ndarray,
+              roi: tuple[int, int, int, int], gain: int = 4) -> None:
+    """Leak view (preview only): |vcam output - matched plate| amplified and shown in red.
+
+    Where you vanished the output IS the matched plate, so anything red there is you leaking through.
+    Only the vanish region (`roi`, where `plate_roi` is the matched plate) is examined; the rest of the
+    frame is the live room and is left alone."""
+    x0, y0, x1, y1 = roi
+    ch = cv2.split(cv2.absdiff(out[y0:y1, x0:x1], plate_roi))
+    d = cv2.convertScaleAbs(cv2.max(cv2.max(ch[0], ch[1]), ch[2]), alpha=gain)
+    part = img[y0:y1, x0:x1]
+    part[:, :, 2] = cv2.add(part[:, :, 2], d)
+    part[:, :, 0] = cv2.subtract(part[:, :, 0], d)
+    part[:, :, 1] = cv2.subtract(part[:, :, 1], d)
+    _text(img, f"LEAK VIEW: red = |output - matched plate| x{gain} inside the vanish region; should be none where you were",
+          (16, img.shape[0] - 46), scale=0.5, color=(0, 200, 255))
