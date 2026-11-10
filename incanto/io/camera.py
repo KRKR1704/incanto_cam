@@ -73,6 +73,7 @@ EXPOSURE_MIN, EXPOSURE_MAX = -13.0, 0.0
 # Exposure is log2(seconds) on this backend: -5 = 31 ms, about one 30 fps frame period. Longer than
 # that and the camera must lower its frame rate (measured: auto exposure in a dim room -> 15 fps).
 EXPOSURE_FPS_LIMIT = -5.0
+_AUTO = "auto"  # ThreadedCamera: pending request to return to auto exposure
 
 
 class CameraError(RuntimeError):
@@ -222,7 +223,7 @@ class ThreadedCamera:
         self._frame: np.ndarray | None = None
         self._seq = 0
         self._last_seq = 0
-        self._pending_exposure: float | None = None
+        self._pending_exposure: float | str | None = None  # a number = manual, _AUTO = back to auto
         self._frame_time = 0.0
         self.frame_time = 0.0  # perf_counter() when the frame last returned by read() arrived
         self._error: Exception | None = None
@@ -237,7 +238,9 @@ class ThreadedCamera:
         try:
             while not self._stop:
                 pending, self._pending_exposure = self._pending_exposure, None
-                if pending is not None:  # apply between reads: VideoCapture is not thread-safe
+                if pending == _AUTO:  # apply between reads: VideoCapture is not thread-safe
+                    log.info("exposure set to auto (accepted=%s)", self._cam.set_auto_exposure())
+                elif pending is not None:
                     ok = self._cam.set_exposure(pending)
                     log.info("exposure set to %.0f (accepted=%s)", pending, ok)
                 frame = self._cam.read(self.timer)
@@ -288,6 +291,10 @@ class ThreadedCamera:
     def request_exposure(self, value: float) -> None:
         """Ask the capture thread to switch to manual exposure `value` before its next read."""
         self._pending_exposure = value
+
+    def request_auto_exposure(self) -> None:
+        """Ask the capture thread to hand exposure back to the camera before its next read."""
+        self._pending_exposure = _AUTO
 
     def release(self) -> None:
         self._stop = True
