@@ -113,7 +113,8 @@ class PlateCapture:
 
     countdown (preview shows the count) -> settle (auto exposure adapts to the empty room) ->
     capturing (N frames averaged) -> done, or aborted if the segmenter still sees a person.
-    The vcam output is untouched: this only produces preview text via `banner()`.
+    The vcam output is untouched: this only produces preview text via `banner()` and audio-cue
+    names via `pop_events()` ("tick" for each countdown second, "capturing", "error" on abort).
     """
 
     IDLE, COUNTDOWN, SETTLE, CAPTURING, DONE, ABORTED = (
@@ -126,6 +127,13 @@ class PlateCapture:
         self.peak_coverage = 0.0
         self._acc = PlateAccumulator()
         self._phase_start = 0.0
+        self._events: list[str] = []
+        self._ticks_left = 0
+
+    def pop_events(self) -> list[str]:
+        """Audio cues due since the last call (the caller plays them)."""
+        events, self._events = self._events, []
+        return events
 
     @property
     def active(self) -> bool:
@@ -135,6 +143,8 @@ class PlateCapture:
         self.state, self.abort_reason, self.peak_coverage = self.COUNTDOWN, "", 0.0
         self._acc = PlateAccumulator()
         self._phase_start = now
+        self._ticks_left = int(np.ceil(self.countdown_s))  # one tick per whole second still to go
+        self._events = ["tick"] if self._ticks_left else []
         log.info("Plate capture: leave the frame. Countdown %.0fs, settle %.1fs, then %d frames.",
                  self.countdown_s, self.settle_s, self.frames)
 
@@ -143,10 +153,16 @@ class PlateCapture:
             self.state = self.IDLE
 
     def update(self, frame: np.ndarray, mask: np.ndarray | None, now: float) -> None:
+        if self.state == self.COUNTDOWN:
+            left = int(np.ceil(self.countdown_s - (now - self._phase_start)))
+            if 0 < left < self._ticks_left:  # the displayed number just dropped: one beep per second
+                self._ticks_left = left
+                self._events.append("tick")
         if self.state == self.COUNTDOWN and now - self._phase_start >= self.countdown_s:
             self.state, self._phase_start = self.SETTLE, now
         if self.state == self.SETTLE and now - self._phase_start >= self.settle_s:
             self.state = self.CAPTURING
+            self._events.append("capturing")
             log.info("Plate capture: capturing %d frames now.", self.frames)
         if self.state == self.CAPTURING:
             if mask is not None:
@@ -157,6 +173,7 @@ class PlateCapture:
                     self.abort_reason = (f"Person still in frame ({coverage:.1%} of pixels, "
                                          f"{self.max_coverage:.1%} allowed). Plate NOT saved. Press B to retry.")
                     self._phase_start = now
+                    self._events.append("error")
                     log.warning("Plate capture aborted: %s", self.abort_reason)
                     return
             self._acc.add(frame)
