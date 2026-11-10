@@ -1,4 +1,4 @@
-"""Plate health check, background refresh (never inside the near-me zone), capture audio cues."""
+"""Plate health (judged after gain matching), background refresh (never inside the near-me zone), capture audio cues."""
 import dataclasses
 
 import cv2
@@ -8,7 +8,7 @@ import pytest
 from incanto.config import PlateConfig, VanishConfig
 from incanto.io.sounds import CUES, SoundCues
 from incanto.plate.clean_plate import PlateCapture
-from incanto.plate.health import HealthLimits, measure_plate_health
+from incanto.plate.health import HealthLimits, HealthMonitor, measure_plate_health
 from incanto.render.vanish_mask import REFRESH_EVERY, VanishMask
 
 W, H = 640, 360
@@ -31,104 +31,230 @@ def person_seg(x0=260, x1=380, y0=120, y1=300):
     return seg
 
 
-# -- health check ------------------------------------------------------------------------------
+# -- health check: judged after gain matching -----------------------------------------------------
 
-def test_defaults_match_the_agreed_limits():
+def room():
+    """A plate with real edges (furniture, a door frame), so structure can be compared."""
+    img = make_plate().astype(np.float32)
+    rng = np.random.default_rng(7)
+    for _ in range(40):
+        x, y = int(rng.integers(0, W - 60)), int(rng.integers(0, H - 50))
+        w, h = int(rng.integers(20, 90)), int(rng.integers(15, 70))
+        img[y:y + h, x:x + w] = img[y:y + h, x:x + w] * rng.uniform(0.55, 1.35) + rng.uniform(-10, 10, 3)
+    return np.clip(img, 20, 235).astype(np.uint8)
+
+
+def test_defaults_come_from_config():
     p = PlateConfig()
-    assert (p.health_max_raw_diff, p.health_gain_min, p.health_gain_max, p.health_max_cell_gain) == (20.0, 0.8, 1.25, 1.5)
-    assert (LIMITS.max_raw_diff, LIMITS.gain_min, LIMITS.gain_max, LIMITS.max_cell_gain) == (20.0, 0.8, 1.25, 1.5)
-    assert p.countdown_s == 5.0 and p.sounds is True
+    assert (p.health_max_residual, p.health_min_structure, p.health_gain_min, p.health_gain_max,
+            p.health_min_cell_background, p.health_hysteresis) == (
+        LIMITS.max_residual, LIMITS.min_structure, LIMITS.gain_min, LIMITS.gain_max,
+        LIMITS.min_cell_background, LIMITS.hysteresis)
+    assert (p.health_gain_min, p.health_gain_max, p.health_min_cell_background, p.health_fail_s) == (0.5, 2.0, 0.5, 3.0)
+    assert not hasattr(p, "health_max_raw_diff") and not hasattr(p, "health_max_cell_gain")  # no longer criteria
+    assert p.countdown_s == 5.0 and p.sounds is True and p.lock_exposure is True
     assert VanishConfig().plate_refresh_alpha == pytest.approx(0.02)
 
 
 def test_matching_plate_is_healthy():
-    plate = make_plate()
-    h = measure_plate_health(scaled(plate, 1.05), plate, None, LIMITS)
+    plate = room()
+    h = measure_plate_health(plate, plate, None, LIMITS)
     assert h.ok and h.reasons == ()
-    assert h.raw_diff == pytest.approx(0.05 * plate.mean(), abs=1.5)
-    assert all(g == pytest.approx(1.05, abs=0.02) for g in h.gain)
-    assert h.max_cell_gain == pytest.approx(1.05, abs=0.03)
-    assert h.background == 1.0
+    assert h.residual < 0.3 and h.structure > 0.99 and h.gain == pytest.approx(1.0, abs=0.01)
+    assert h.cells == 48 and h.background == 1.0
+    assert "healthy" in h.describe()
 
 
-def test_stale_plate_like_the_live_test_fails():
-    """Yesterday evening's plate against today's room: raw diff about +50, gain far above 1.25."""
-    live = make_plate()
-    plate = scaled(live, 0.55)
+@pytest.mark.parametrize("gain", [0.64, 0.7, 0.86, 1.22, 1.5])
+def test_exposure_swings_do_not_fail_a_good_plate(gain):
+    """The live test: auto exposure moved the raw picture by -51..+30 levels (gain 0.64..1.22) while
+    the plate was fine. Raw difference and global gain are no longer failure criteria."""
+    plate = room()
+    live = scaled(plate, gain)
+    assert abs(float(live.mean()) - float(plate.mean())) > 15  # the old +/-20 raw-diff limit would trip on most
+    h = measure_plate_health(live, plate, person_seg(), LIMITS, margin_px=15)
+    assert h.ok, h.describe()
+    assert h.residual < 1.5 and h.structure > 0.9
+    assert h.gain == pytest.approx(gain, abs=0.05)
+
+
+def test_gain_is_only_a_loose_sanity_cap():
+    plate = np.clip(room().astype(np.float32) * 0.5 + 20, 0, 255).astype(np.uint8)  # dim plate: no clipping at 2.3x
+    for gain, ok in ((0.45, False), (0.55, True), (1.9, True), (2.3, False)):
+        h = measure_plate_health(scaled(plate, gain), plate, None, dataclasses.replace(LIMITS, max_residual=255))
+        assert h.ok is ok, (gain, h.describe())
+        if not ok:
+            assert len(h.reasons) == 1 and "gain" in h.reasons[0]
+
+
+def test_lighting_the_gain_map_cannot_follow_fails_on_residual():
+    """Hard-edged light and shadow patches (another lamp, sun through blinds): matched cell by cell,
+    the plate is still several levels off in many cells."""
+    plate = room()
+    rng = np.random.default_rng(3)
+    field = np.ones((H, W), np.float32)
+    for _ in range(14):
+        x, y = int(rng.integers(0, W - 120)), int(rng.integers(0, H - 90))
+        field[y:y + int(rng.integers(50, 110)), x:x + int(rng.integers(60, 140))] *= rng.choice([0.72, 1.38])
+    live = np.clip(plate * field[..., None], 0, 255).astype(np.uint8)
     h = measure_plate_health(live, plate, None, LIMITS)
-    assert not h.ok
-    assert h.raw_diff > 20
-    assert any("raw diff" in r for r in h.reasons) and any("gain" in r for r in h.reasons)
-    assert "FAILED" in h.describe()
+    assert not h.ok and h.residual > LIMITS.max_residual
+    assert any("matched residual" in r for r in h.reasons)
+    assert 0.5 < h.gain < 2.0 and not any("gain" in r for r in h.reasons)
 
 
-def test_raw_diff_limit_alone():
-    plate = make_plate()
-    darker = np.clip(plate.astype(np.int16) - 23, 0, 255).astype(np.uint8)  # offset, gain stays near 0.8+
-    h = measure_plate_health(darker, plate, None, HealthLimits(gain_min=0.5))
-    assert not h.ok and len(h.reasons) == 1 and "raw diff -" in h.reasons[0]
-    assert measure_plate_health(darker, plate, None, HealthLimits(max_raw_diff=30, gain_min=0.5)).ok
+@pytest.mark.parametrize("shift", [48, 120])
+def test_moved_camera_fails_on_structure_whatever_the_brightness(shift):
+    plate = room()
+    for gain in (1.0, 0.7, 1.3):
+        live = scaled(np.roll(plate, shift, axis=1), gain)
+        h = measure_plate_health(live, plate, None, LIMITS)
+        assert not h.ok and h.structure < LIMITS.min_structure, h.describe()
+        assert any("structure" in r for r in h.reasons)
 
 
-@pytest.mark.parametrize("gain, ok", [(0.75, False), (0.85, True), (1.2, True), (1.3, False)])
-def test_global_gain_limits(gain, ok):
-    plate = make_plate()
-    h = measure_plate_health(scaled(plate, gain), plate, None, HealthLimits(max_raw_diff=255))
-    assert h.ok is ok
-    if not ok:
-        assert "gain" in h.reasons[0]
+def test_different_room_fails_on_structure():
+    h = measure_plate_health(room()[::-1, ::-1].copy(), room(), None, LIMITS)
+    assert not h.ok and h.structure < 0.2
 
 
-def test_one_colour_channel_out_of_range_fails():
-    plate = make_plate()
+def test_structure_ignores_exposure_and_small_local_changes():
+    plate = room()
+    for gain in (0.6, 1.5):
+        assert measure_plate_health(scaled(plate, gain), plate, None, LIMITS).structure > 0.95
     live = plate.copy()
-    live[..., 0] = scaled(plate[..., 0], 0.7)  # colour cast: blue drops, brightness barely moves
+    live[200:330, 420:520] = (40, 45, 50)  # a chair that was moved: one corner of the room changed
     h = measure_plate_health(live, plate, None, LIMITS)
-    assert not h.ok and h.gain[0] < 0.8 < h.gain[1]
+    assert h.ok and LIMITS.min_structure < h.structure < 0.99
 
 
-def test_single_bad_cell_fails_even_when_global_numbers_pass():
-    plate = make_plate()
-    live = plate.copy()
-    live[0:60, 0:80] = scaled(plate[0:60, 0:80], 1.9)  # one grid cell (8x6 grid: 80x60 px) lit very differently
-    h = measure_plate_health(live, plate, None, LIMITS)
-    assert abs(h.raw_diff) < 20 and all(0.8 < g < 1.25 for g in h.gain)
-    assert h.max_cell_gain > 1.5
-    assert not h.ok and "cell gain" in h.reasons[0]
+def test_structure_is_skipped_on_a_blank_wall():
+    wall = np.full((H, W, 3), 150, np.uint8)
+    h = measure_plate_health(scaled(wall, 0.8), wall, None, LIMITS)
+    assert h.structure is None and h.ok and "n/a" in h.describe()
 
 
 def test_person_is_excluded_from_the_measurement():
-    plate = make_plate()
+    plate = room()
     live = plate.copy()
     live[120:300, 260:380] = (250, 250, 250)  # the person: nothing like the plate
-    assert not measure_plate_health(live, plate, None, LIMITS).ok
     h = measure_plate_health(live, plate, person_seg(), LIMITS, margin_px=15)
-    assert h.ok and h.background < 1.0
+    assert h.ok and h.background < 1.0 and h.residual < 1.0 and h.structure > 0.95
 
 
-def test_dark_cells_are_not_judged():
-    plate = np.full((H, W, 3), 8, np.uint8)
-    live = np.full((H, W, 3), 14, np.uint8)  # ratio 1.75, but on near-black pixels it means nothing
-    h = measure_plate_health(live, plate, None, HealthLimits(gain_max=3.0))
-    assert h.max_cell_gain == 1.0 and h.ok
+# cells are 80x60 px (8x6 grid on 640x360). This mask leaves, per cell: columns 3-4 x rows 2-5 nothing,
+# columns 2 and 5 x rows 2-5 a 30 px strip (38% background), columns 3-4 x row 1 a 20 px strip (33%).
+MOSTLY_ME = (slice(80, 360), slice(190, 450))
+LOW_BG_STRIPS = [(slice(120, 360), slice(160, 190)), (slice(120, 360), slice(450, 480))]
 
 
-def test_no_verdict_without_background():
-    plate = make_plate()
+def close_up_seg():
+    seg = np.zeros((H, W), np.float32)
+    seg[MOSTLY_ME] = 1.0
+    return seg
+
+
+def test_only_cells_that_are_mostly_background_are_counted():
+    plate = room()
+    h = measure_plate_health(plate, plate, close_up_seg(), LIMITS)
+    assert h.cells == 30  # 48 - 16 (columns 2-5, rows 2-5) - 2 (columns 3-4, row 1)
+    loose = measure_plate_health(plate, plate, close_up_seg(), dataclasses.replace(LIMITS, min_cell_background=0.3))
+    assert loose.cells == 40
+
+
+def test_leftovers_in_cells_mostly_covered_by_me_do_not_count():
+    """The segmenter misses a strip of me (arm, hair, shadow) beside the mask. Those cells are mostly
+    covered, so by default they are not judged; judged anyway, the same frame fails."""
+    plate = room()
+    live = plate.copy()
+    rng = np.random.default_rng(5)
+    for rows, cols in LOW_BG_STRIPS:
+        part = plate[rows, cols].astype(np.float32) * 1.42  # plausible as lighting, wrong as background
+        part[::6] *= 0.72                                    # ...and with edges the plate does not have
+        live[rows, cols] = np.clip(part + rng.normal(0, 2, part.shape), 0, 255).astype(np.uint8)
+    strict = measure_plate_health(live, plate, close_up_seg(), LIMITS)
+    loose = measure_plate_health(live, plate, close_up_seg(), dataclasses.replace(LIMITS, min_cell_background=0.3))
+    assert strict.cells == 30 and loose.cells == 40
+    assert strict.ok, strict.describe()
+    assert strict.structure > 0.9 and strict.structure > loose.structure + 0.05, (strict.describe(), loose.describe())
+    assert loose.max_cell_residual > 2 * strict.max_cell_residual and loose.residual > strict.residual
+    assert not loose.ok
+
+
+def test_no_verdict_when_i_fill_the_frame():
+    plate = room()
+    seg = np.zeros((H, W), np.float32)
+    seg[:, 30:] = 1.0  # leaning into the camera: a 30 px sliver of background, no cell is half background
+    assert measure_plate_health(plate, plate, seg, LIMITS) is None
     assert measure_plate_health(plate, plate, np.ones((H, W), np.float32), LIMITS) is None
 
 
+def test_hysteresis_needs_margin_after_a_failure():
+    plate = room()
+    live = scaled(np.roll(plate, 3, axis=1), 1.1)  # a nudged camera: structure below 1 but not terrible
+    s = measure_plate_health(live, plate, None, LIMITS).structure
+    limits = dataclasses.replace(LIMITS, min_structure=s - 0.01, hysteresis=0.2)
+    assert measure_plate_health(live, plate, None, limits).ok
+    again = measure_plate_health(live, plate, None, limits, recovering=True)
+    assert not again.ok and "structure" in again.reasons[0]
+    residual_limits = dataclasses.replace(LIMITS, max_residual=1.0, min_structure=-1.0)
+    r = measure_plate_health(live, plate, None, residual_limits).residual
+    residual_limits = dataclasses.replace(residual_limits, max_residual=r * 1.1)
+    assert measure_plate_health(live, plate, None, residual_limits).ok
+    assert not measure_plate_health(live, plate, None, residual_limits, recovering=True).ok
+
+
+def test_monitor_trips_only_after_a_sustained_failure():
+    plate = room()
+    good = measure_plate_health(plate, plate, None, LIMITS)
+    bad = measure_plate_health(np.roll(plate, 80, axis=1), plate, None, LIMITS)
+    m = HealthMonitor(fail_s=3.0)
+    assert not m.ok and not m.recovering and not m.tripped(0.0)  # nothing judged yet
+    assert m.update(good, 0.0) is True and m.ok
+    assert m.update(good, 0.5) is False
+    assert m.update(bad, 1.0) is True and not m.ok and m.recovering
+    assert not m.tripped(1.0) and not m.tripped(3.9)   # failing, but not for 3 s yet
+    assert m.update(None, 2.0) is False and m.recovering  # a frame that could not be judged changes nothing
+    assert m.update(bad, 3.5) is False
+    assert m.tripped(4.0)                                # 3 s after the first failed check
+    assert m.update(good, 4.5) is True and m.ok and not m.tripped(9.0)
+    # a pass in between restarts the clock
+    m.update(bad, 10.0); m.update(good, 12.0); m.update(bad, 12.5)
+    assert not m.tripped(13.5) and m.tripped(15.5)
+    m.reset()
+    assert m.health is None and not m.recovering
+
+
+def test_standing_up_and_sitting_down_never_trips():
+    """Stand up (exposure drops, more of the room visible), sit down (it rises), lean in (few cells)."""
+    plate = room()
+    m = HealthMonitor(fail_s=3.0)
+    v = VanishMask(VanishConfig(), (W, H), (W, H))
+    v.set_plate(plate)
+    t = 0.0
+    for gain, seg in ((1.06, person_seg()), (0.68, person_seg(y0=0, y1=200)), (0.86, person_seg()),
+                      (1.22, person_seg()), (0.7, np.zeros((H, W), np.float32)), (1.06, close_up_seg())) * 2:
+        live = scaled(plate, gain)
+        live[seg > 0] = (30, 220, 60)
+        for _ in range(8):  # 4 s in each pose
+            t += 0.5
+            m.update(v.check_health(live, seg, [], LIMITS, recovering=m.recovering), t)
+            assert m.ok and not m.tripped(t), (gain, m.health.describe())
+
+
 def test_vanish_mask_check_health_works_before_vanish_is_on():
-    plate = make_plate()
+    plate = room()
     v = VanishMask(VanishConfig(), (W, H), (W, H))
     assert v.check_health(plate, person_seg(), [], LIMITS) is None  # no plate yet
+    assert v.background_gain(plate, person_seg(), []) is None
     v.set_plate(plate)
-    live = scaled(plate, 1.1)
+    live = scaled(plate, 0.8)
     live[120:300, 260:380] = (30, 220, 60)
     assert v.check_health(live, person_seg(), [], LIMITS).ok
-    stale = VanishMask(VanishConfig(), (W, H), (W, H))
-    stale.set_plate(scaled(plate, 0.55))
-    assert not stale.check_health(live, person_seg(), [], LIMITS).ok
+    assert v.background_gain(live, person_seg(), []) == pytest.approx(0.8, abs=0.02)
+    moved = VanishMask(VanishConfig(), (W, H), (W, H))
+    moved.set_plate(np.roll(plate, 60, axis=1))
+    assert not moved.check_health(live, person_seg(), [], LIMITS).ok
 
 
 # -- background refresh ------------------------------------------------------------------------
