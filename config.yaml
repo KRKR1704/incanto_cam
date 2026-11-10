@@ -30,18 +30,28 @@ camera:
                                # keeps the camera at 30 fps in dim rooms; [ and ] nudge it while running
 
 preview:
-  every_n: 2                   # update the preview window every Nth frame (vcam output is every frame)
+  every_n: 3                   # update the preview window every Nth frame (vcam output is every frame); 2 costs ~2 FPS more
+                               # with the vanish debug views (preview drawing is ~8-13 ms per shown frame)
 
 vanish:                        # the mask used when V replaces you with the plate. Over-covering is free,
                                # under-covering shows you, so everything is biased toward covering.
   mask_mode: full              # seg_only | seg_hands | full (segmenter + hand hulls + plate difference)
   dilate_px: 15                # grow the segmenter mask (px at 1280 wide)
   hand_hull_dilate_px: 25      # grow each hand's filled convex hull (landmarks are ~50 ms old)
-  feather_px: 7                # soften hull / plate-difference edges
-  plate_diff_threshold: 28     # gray levels of |live - matched plate| counted as "not background"
+  core_threshold: 0.1          # a pixel is "covered" (alpha exactly 1.0) if ANY source exceeds this
+  core_close_px: 15            # close pinholes in the solid core
+  outer_feather_px: 12         # blend ring OUTSIDE the solid core only, so the soft edge never overlaps you
+  plate_diff_metric: max_channel  # gray | max_channel | lab: how |live - matched plate| is measured
+                               # (gray missed 90% of the leaking pixels near me: similar brightness, other colour)
+  plate_diff_threshold: 28     # levels of difference counted as "not background"
   plate_diff_open_px: 3        # morphological open on the difference mask (remove speckle)
   plate_diff_close_px: 9       # morphological close (fill holes)
-  plate_diff_max_fraction: 0.5 # skip the difference mask if it covers more than this (lighting change)
+  plate_diff_release_decay: 0.8  # fast attack, slow release for the difference mask and the near-me zone
+  plate_diff_large_blob_fraction: 0.05  # a difference this big (fraction of the frame) counts anywhere, so a
+                               # segmenter dropout cannot expose you; 0 = plate difference only near me
+  plate_diff_cell_guard: true  # per grid cell: ignore the difference where a neutral lighting gain explains it
+  plate_diff_wash_fraction: 0.85  # guard: cell is a "wash" if this much of its uncovered pixels differ...
+  plate_diff_wash_residual: 12.0  # ...and one neutral gain explains the cell to within this many levels
   near_me_px: 70               # plate difference only counts this far around the mask; moved objects
                                # elsewhere stay live
   plate_match: gain_map        # off | gain | gain_offset (one global correction) | gain_map (per-cell gain grid)

@@ -64,6 +64,7 @@ class CameraConfig:
 
 VANISH_MASK_MODES = ("seg_only", "seg_hands", "full")
 PLATE_MATCH_MODES = ("off", "gain", "gain_offset", "gain_map")
+PLATE_DIFF_METRICS = ("gray", "max_channel", "lab")
 
 
 @dataclass(frozen=True)
@@ -74,11 +75,18 @@ class VanishConfig:
     mask_mode: str = "full"              # seg_only | seg_hands | full (seg + hands + plate difference)
     dilate_px: int = 15                  # grow the segmenter mask
     hand_hull_dilate_px: int = 25        # grow the filled convex hull of each hand (landmarks are ~50 ms old)
-    feather_px: int = 7                  # soften hull / plate-difference edges
-    plate_diff_threshold: int = 28       # gray levels of |live - matched plate| that count as "not background"
+    core_threshold: float = 0.1          # a pixel is "covered" (alpha exactly 1) if any source exceeds this
+    core_close_px: int = 15              # close pinholes in the solid core
+    outer_feather_px: int = 12           # blend ring OUTSIDE the solid core only (the ring never overlaps you)
+    plate_diff_metric: str = "max_channel"  # gray | max_channel | lab: how |live - matched plate| is measured
+    plate_diff_threshold: int = 28       # levels of difference that count as "not background"
     plate_diff_open_px: int = 3          # morphological open: remove speckle
     plate_diff_close_px: int = 9         # morphological close: fill holes
-    plate_diff_max_fraction: float = 0.5  # ignore the difference mask above this coverage (lighting change)
+    plate_diff_release_decay: float = 0.8  # fast attack / slow release for the difference mask and zone
+    plate_diff_large_blob_fraction: float = 0.05  # body-sized differences count anywhere (0 = only near me)
+    plate_diff_cell_guard: bool = True   # per-cell lighting guard replaces the old global kill switch
+    plate_diff_wash_fraction: float = 0.85  # guard: a cell is a "wash" if this much of it differs...
+    plate_diff_wash_residual: float = 12.0  # ...and one neutral gain explains it to within this many levels
     near_me_px: int = 70                 # the plate difference is only allowed this far around the mask
     plate_match: str = "gain_map"        # off | gain | gain_offset | gain_map: match the plate to live brightness/colour
     plate_match_cells_x: int = 8         # gain_map grid size
@@ -230,16 +238,25 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError(f"vanish.mask_mode must be one of {VANISH_MASK_MODES}, got '{vanish.mask_mode}'")
     if vanish.plate_match not in PLATE_MATCH_MODES:
         raise ConfigError(f"vanish.plate_match must be one of {PLATE_MATCH_MODES}, got '{vanish.plate_match}'")
-    for key in ("dilate_px", "hand_hull_dilate_px", "feather_px", "plate_diff_open_px",
-                "plate_diff_close_px", "match_margin_px", "plate_diff_threshold", "near_me_px"):
+    if vanish.plate_diff_metric not in PLATE_DIFF_METRICS:
+        raise ConfigError(f"vanish.plate_diff_metric must be one of {PLATE_DIFF_METRICS}, got '{vanish.plate_diff_metric}'")
+    for key in ("dilate_px", "hand_hull_dilate_px", "core_close_px", "outer_feather_px", "plate_diff_open_px",
+                "plate_diff_close_px", "match_margin_px", "plate_diff_threshold", "near_me_px",
+                "plate_diff_wash_residual"):
         if getattr(vanish, key) < 0:
             raise ConfigError(f"vanish.{key} must be >= 0")
     if not (1 <= vanish.plate_match_cells_x <= 64 and 1 <= vanish.plate_match_cells_y <= 64):
         raise ConfigError("vanish.plate_match_cells_x and plate_match_cells_y must be between 1 and 64")
     if not 0 < vanish.plate_match_smoothing <= 1:
         raise ConfigError("vanish.plate_match_smoothing must be in (0, 1]")
-    if not 0 < vanish.plate_diff_max_fraction <= 1:
-        raise ConfigError("vanish.plate_diff_max_fraction must be in (0, 1]")
+    if not 0 <= vanish.core_threshold < 1:
+        raise ConfigError("vanish.core_threshold must be in [0, 1)")
+    if not 0 <= vanish.plate_diff_release_decay < 1:
+        raise ConfigError("vanish.plate_diff_release_decay must be in [0, 1)")
+    if not 0 <= vanish.plate_diff_large_blob_fraction <= 1:
+        raise ConfigError("vanish.plate_diff_large_blob_fraction must be between 0 and 1")
+    if not 0 < vanish.plate_diff_wash_fraction <= 1:
+        raise ConfigError("vanish.plate_diff_wash_fraction must be in (0, 1]")
 
     if plate.frames < 1:
         raise ConfigError("plate.frames must be >= 1")
