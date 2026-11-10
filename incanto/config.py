@@ -93,15 +93,25 @@ class VanishConfig:
     plate_match_cells_y: int = 6
     plate_match_smoothing: float = 0.15  # weight of each frame's estimate in the running gain/offset
     match_margin_px: int = 30            # background used for matching is this far outside the mask
+    plate_refresh_alpha: float = 0.02    # per frame: blend live pixels into the plate OUTSIDE the near-me zone (0 = off)
+    plate_refresh_guard_px: int = 40     # the refresh stays this much further out than the near-me zone
 
 
 @dataclass(frozen=True)
 class PlateConfig:
     frames: int = 30                     # frames averaged into the clean plate
-    countdown_s: float = 3.0             # preview-only countdown after pressing B (time to leave the frame)
+    countdown_s: float = 5.0             # countdown after pressing B (time to leave the frame)
     settle_s: float = 1.0                # extra wait for auto exposure to settle on the empty room
     max_person_coverage: float = 0.02    # abort if the mask covers more than this fraction of the frame
     dir: str = "plates"                  # local-only (gitignored): a photo of your room
+    sounds: bool = True                  # beeps for countdown / capturing / captured / error (winsound, Windows only)
+    # Plate health: the plate must match the visible background, else vanish is refused / switched off.
+    health_max_raw_diff: float = 20.0    # |mean live background - mean plate background|, levels
+    health_gain_min: float = 0.8         # global live/plate gain (each colour channel) must stay inside
+    health_gain_max: float = 1.25        # ...this range
+    health_max_cell_gain: float = 1.5    # no grid cell may need more gain than this
+    health_check_s: float = 0.5          # how often the plate is checked against the room
+    health_fail_s: float = 1.0           # while vanish is on: unhealthy for this long switches vanish off
 
     def resolve_dir(self) -> Path:
         path = Path(self.dir)
@@ -242,7 +252,7 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError(f"vanish.plate_diff_metric must be one of {PLATE_DIFF_METRICS}, got '{vanish.plate_diff_metric}'")
     for key in ("dilate_px", "hand_hull_dilate_px", "core_close_px", "outer_feather_px", "plate_diff_open_px",
                 "plate_diff_close_px", "match_margin_px", "plate_diff_threshold", "near_me_px",
-                "plate_diff_wash_residual"):
+                "plate_diff_wash_residual", "plate_refresh_guard_px"):
         if getattr(vanish, key) < 0:
             raise ConfigError(f"vanish.{key} must be >= 0")
     if not (1 <= vanish.plate_match_cells_x <= 64 and 1 <= vanish.plate_match_cells_y <= 64):
@@ -257,6 +267,8 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError("vanish.plate_diff_large_blob_fraction must be between 0 and 1")
     if not 0 < vanish.plate_diff_wash_fraction <= 1:
         raise ConfigError("vanish.plate_diff_wash_fraction must be in (0, 1]")
+    if not 0 <= vanish.plate_refresh_alpha <= 0.5:
+        raise ConfigError("vanish.plate_refresh_alpha must be between 0 (off) and 0.5")
 
     if plate.frames < 1:
         raise ConfigError("plate.frames must be >= 1")
@@ -264,6 +276,12 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError("plate.countdown_s and plate.settle_s must be >= 0")
     if not 0 <= plate.max_person_coverage <= 1:
         raise ConfigError("plate.max_person_coverage must be between 0 and 1")
+    if plate.health_max_raw_diff <= 0 or plate.health_max_cell_gain <= 1:
+        raise ConfigError("plate.health_max_raw_diff must be > 0 and plate.health_max_cell_gain > 1")
+    if not 0 < plate.health_gain_min < 1 < plate.health_gain_max:
+        raise ConfigError("plate.health_gain_min must be in (0, 1) and plate.health_gain_max above 1")
+    if plate.health_check_s <= 0 or plate.health_fail_s < 0:
+        raise ConfigError("plate.health_check_s must be > 0 and plate.health_fail_s >= 0")
 
     mappings = _section(raw, "mappings")
     for gesture, spell in mappings.items():

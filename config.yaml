@@ -59,13 +59,25 @@ vanish:                        # the mask used when V replaces you with the plat
   plate_match_cells_y: 6
   plate_match_smoothing: 0.15  # weight of each frame's estimate in the running gain/offset
   match_margin_px: 30          # background used for matching lies this far outside the mask
+  plate_refresh_alpha: 0.02    # while vanish is on and the plate is healthy: blend this much of each live
+                               # frame into the plate OUTSIDE the near-me zone, so it tracks daylight (0 = off)
+  plate_refresh_guard_px: 40   # the refresh stays this much further out than the near-me zone
 
 plate:                         # clean plate of the empty room (plates/ is local-only, gitignored)
   frames: 30                   # frames averaged into the plate
-  countdown_s: 3.0             # preview-only countdown after pressing B: time to leave the frame
+  countdown_s: 5.0             # countdown after pressing B: time to leave the frame
   settle_s: 1.0                # extra wait for auto exposure to settle on the empty room
   max_person_coverage: 0.02    # abort the capture if the person mask covers more than this fraction
   dir: plates
+  sounds: true                 # beeps: each countdown second, capturing, captured OK, error (Windows only)
+  # Plate health: checked when you press V and continuously after. If the plate does not match the
+  # visible background, vanish is refused / switched off and you are asked to press B.
+  health_max_raw_diff: 20.0    # |mean live background - mean plate background| in levels
+  health_gain_min: 0.8         # global live/plate gain (each colour channel) must be inside this range
+  health_gain_max: 1.25
+  health_max_cell_gain: 1.5    # no grid cell may need more gain than this
+  health_check_s: 0.5          # seconds between checks
+  health_fail_s: 1.0           # while vanish is on, unhealthy for this long switches it off
 
 vcam:
   backend: obs                 # obs | unitycapture
