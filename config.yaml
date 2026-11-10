@@ -32,6 +32,8 @@ camera:
 preview:
   every_n: 3                   # update the preview window every Nth frame (vcam output is every frame); 2 costs ~2 FPS more
                                # with the vanish debug views (preview drawing is ~8-13 ms per shown frame)
+  scale: 0.5                   # preview window at half size: about half the preview cost. The virtual camera
+                               # output is always full resolution; 1.0 = full-size preview
 
 vanish:                        # the mask used when V replaces you with the plate. Over-covering is free,
                                # under-covering shows you, so everything is biased toward covering.
@@ -60,14 +62,19 @@ vanish:                        # the mask used when V replaces you with the plat
   plate_match_smoothing: 0.15  # weight of each frame's estimate in the running gain/offset
   match_margin_px: 30          # background used for matching lies this far outside the mask
   plate_refresh_alpha: 0.02    # while vanish is on and the plate is healthy: blend this much of each live
-                               # frame into the plate OUTSIDE the near-me zone, so it tracks daylight (0 = off)
-  plate_refresh_guard_px: 40   # the refresh stays this much further out than the near-me zone
+                               # frame into the plate around the mask, so it tracks daylight (0 = off). Only
+                               # pixels every mask source calls background AND that still match the matched plate
+  plate_refresh_margin_px: 15  # the refresh stays this far outside the mask (all sources, plus the feather)
 
 plate:                         # clean plate of the empty room (plates/ is local-only, gitignored)
   frames: 30                   # frames averaged into the plate
   countdown_s: 5.0             # countdown after pressing B: time to leave the frame
   settle_s: 1.0                # extra wait for auto exposure to settle on the empty room
-  max_person_coverage: 0.02    # abort the capture if the person mask covers more than this fraction
+  max_person_coverage: 0.02    # abort the capture if MOVING person blobs cover more than this fraction
+  static_blob_max_motion: 0.02 # a segmenter blob in which less than this share of pixels moved during the last
+                               # second is furniture (a chair with a headrest), not a person. Measured: a person
+                               # sitting still 6-40%, static background 0.3%. Shift+B skips the person check
+  debug_dir: docs/evidence/phase-3  # an aborted capture saves a local-only image here showing what was detected
   dir: plates
   sounds: true                 # beeps: each countdown second, capturing, captured OK, error (Windows only)
   # Plate health: checked when you press V and continuously after. If the plate does not match the
@@ -84,6 +91,8 @@ plate:                         # clean plate of the empty room (plates/ is local
   health_hysteresis: 0.2       # after a failed check, pass again only this far inside the limits
   health_check_s: 0.5          # seconds between checks
   health_fail_s: 3.0           # while vanish is on, failing for this long switches it off
+  health_nudge_residual: 2.0   # softer limit: residual above this for health_nudge_s while vanished gives one soft
+  health_nudge_s: 10.0         # beep and "Lighting changed - press B to refresh plate"; vanish stays on
   lock_exposure: true          # after a capture in auto mode, sweep manual exposures (<= -5, so 30 fps holds),
                                # lock the one closest to the plate's brightness; B returns to auto first
   lock_exposure_tolerance: 0.25  # lock only if live gets within this fraction of the plate's brightness,

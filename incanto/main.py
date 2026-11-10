@@ -19,8 +19,8 @@ from incanto.io.exposure_lock import ExposureLock
 from incanto.io.sounds import SoundCues
 from incanto.io.vcam import VCamError, VirtualCamera
 from incanto.perception.hands import HandsWorker, HandTracker
-from incanto.plate.clean_plate import (PlateCapture, load_plate, make_plate, save_plate)
-from incanto.plate.health import HealthLimits, HealthMonitor
+from incanto.plate.clean_plate import (PlateCapture, load_plate, make_plate, save_abort_image, save_plate)
+from incanto.plate.health import HealthLimits, HealthMonitor, StalenessNudge
 from incanto.perception.segmenter import Segmenter
 from incanto.render import overlay
 from incanto.render.compositor import Compositor
@@ -32,10 +32,20 @@ from incanto.utils.imaging import downscale
 from incanto.utils.logging import setup_logging
 
 log = logging.getLogger("incanto")
-PREVIEW_WINDOW = "Incanto preview (Q quit, D debug view, B capture plate, V vanish)"
+PREVIEW_WINDOW = "Incanto preview (Q quit, D debug view, B capture plate, Shift+B force it, V vanish)"
 DEBUG_VIEWS = ("off", "sources", "leak")
 FPS_LOG_INTERVAL_S = 5.0
 PLATE_MISMATCH = "Plate doesn't match the room - press B"
+LIGHTING_CHANGED = "Lighting changed - press B to refresh plate"
+
+
+def _shift_held() -> bool:
+    """True while a Shift key is down (Windows). cv2.waitKey only reports 'B', which Caps Lock also gives."""
+    try:
+        import ctypes
+        return bool(ctypes.windll.user32.GetKeyState(0x10) & 0x8000)
+    except (AttributeError, OSError):
+        return False
 
 
 class SetupError(RuntimeError):
@@ -176,12 +186,13 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         else:
             log.info("No usable plate in %s: press B (with the preview focused) to capture one.", plate_dir)
         capture = PlateCapture(cfg.plate.frames, cfg.plate.countdown_s, cfg.plate.settle_s,
-                               cfg.plate.max_person_coverage)
+                               cfg.plate.max_person_coverage, cfg.plate.static_blob_max_motion)
         cues = SoundCues(cfg.plate.sounds)
         pc = cfg.plate
         limits = HealthLimits(pc.health_max_residual, pc.health_min_structure, pc.health_gain_min,
                               pc.health_gain_max, pc.health_min_cell_background, pc.health_hysteresis)
         monitor = HealthMonitor(pc.health_fail_s)  # latest verdict, hysteresis, sustained-failure timer
+        nudge = StalenessNudge(pc.health_nudge_residual, pc.health_nudge_s)  # soft "lighting changed" hint
         health_at = -1e9
         vanish_on = False
         # V (or --vanish-on-start, for headless timing runs) only asks; the health check decides.
@@ -209,6 +220,10 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                  cfg.video.perception_width, p.num_hands, "async thread" if p.hands_async else "inline",
                  p.segment_every_n, cfg.preview.every_n)
 
+        poll_key = getattr(cv2, "pollKey", None) or (lambda: cv2.waitKey(1))  # pollKey: OpenCV >= 4.5.4
+        preview_size = None  # None = full size
+        if cfg.preview.scale < 1:
+            preview_size = (max(2, round(cam.width * cfg.preview.scale)), max(2, round(cam.height * cfg.preview.scale)))
         if show_preview:
             cv2.namedWindow(PREVIEW_WINDOW, cv2.WINDOW_AUTOSIZE)
         evidence = EvidenceSession(evidence_dir) if evidence_dir and show_preview else None
@@ -222,7 +237,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         frames = frames_since_log = 0
         hud_mode = DEBUG_VIEWS.index(debug_view)  # D cycles off -> sources -> leak
         last_stage_ms: dict[str, float] = {}
-        log.info("Running. Q quits, D toggles the debug HUD, B captures a clean plate, V toggles vanish (applied to the vcam output too; "
+        log.info("Running. Q quits, D toggles the debug HUD, B captures a clean plate (Shift+B: without the person "
+                 "check), V toggles vanish (applied to the vcam output too; "
                  "B/V/D/S/Q are read from the preview window). mask_mode=%s", cfg.vanish.mask_mode)
 
         while True:
@@ -257,9 +273,13 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     try:
                         saved = save_plate(plate, plate_dir)
                         log.info("Plate captured and saved (local-only): %s | %d frames | mean brightness %.1f | "
-                                 "exposure %s | peak person coverage %.2f%%", saved, plate.meta.frames,
+                                 "exposure %s | %s", saved, plate.meta.frames,
                                  plate.meta.mean_brightness, plate.meta.exposure_mode,
-                                 capture.peak_coverage * 100)
+                                 "person check SKIPPED (forced)" if capture.force else
+                                 "moving person coverage %.2f%% | segmenter coverage %.1f%%, of which %.1f%% did "
+                                 "not move and was treated as furniture" % (
+                                     capture.peak_coverage * 100, capture.raw_coverage * 100,
+                                     capture.static_coverage * 100))
                     except OSError as exc:
                         log.error("Plate captured but could not be saved: %s", exc)
                     if shots:
@@ -270,10 +290,19 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     cues.play("ok")
                     previous_session, health_at = False, -1e9
                     monitor.reset()
+                    nudge.reset()
                     if lock:
                         lock.start(now)
-                elif capture.state == capture.ABORTED and lock:
-                    lock.restore()  # the old plate (if any) stays in use, and so does its exposure
+                elif capture.state == capture.ABORTED:
+                    try:
+                        shot = save_abort_image(capture, pc.resolve_debug_dir())
+                        if shot:
+                            log.warning("Capture abort debug image (local-only, never committed): %s | red = counted "
+                                        "as a person (moving), yellow = still blob ignored as furniture", shot)
+                    except (OSError, cv2.error) as exc:
+                        log.error("Could not save the capture abort debug image: %s", exc)
+                    if lock:
+                        lock.restore()  # the old plate (if any) stays in use, and so does its exposure
             for cue in capture.pop_events():
                 cues.play(cue)
             if lock and lock.sweeping:
@@ -313,6 +342,12 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                                         "Press B to capture a new plate.", pc.health_fail_s, checked.describe())
                             status_msg, status_until = PLATE_MISMATCH, now + 6.0
                             cues.play("error")
+                if nudge.update(checked, now, vanish_on):
+                    log.warning("Lighting changed: matched residual has been above %.1f for %.0fs (%s). Vanish stays "
+                                "on; press B to refresh the plate.", pc.health_nudge_residual, pc.health_nudge_s,
+                                checked.describe())
+                    status_msg, status_until = LIGHTING_CHANGED, now + 6.0
+                    cues.play("nudge")
                 if want_vanish:
                     want_vanish = False
                     # No verdict (you fill the frame): trust the last one if this plate has passed before.
@@ -351,7 +386,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
 
             if show_preview and frames % cfg.preview.every_n == 0:
                 t_preview = time.perf_counter()
-                preview = out.copy()  # all debug drawing happens on this copy only
+                # all debug drawing happens on this copy only; at preview.scale < 1 it is a smaller copy
+                preview = out.copy() if preview_size is None else cv2.resize(out, preview_size, interpolation=cv2.INTER_AREA)
                 if DEBUG_VIEWS[hud_mode] == "sources":
                     if vresult is not None:
                         overlay.draw_vanish_sources(preview, vresult)
@@ -371,6 +407,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 else:
                     plate_line = "plate: ready"
                 state_line = ("VANISH ON" if vanish_on else "vanish off") + " | " + plate_line
+                if vanish_on and nudge.showing:
+                    overlay.draw_status(preview, LIGHTING_CHANGED, row=1)
                 overlay.draw_status(preview, state_line)
                 banner = capture.banner(now)
                 if banner:
@@ -380,8 +418,15 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 if evidence:
                     evidence.update(preview, lambda: threading.Thread(
                         target=grab_vcam_frames, args=(evidence.out_dir,), daemon=True).start())
+                t_show = time.perf_counter()
+                timer.add("pv_draw", t_show - t_preview)
                 cv2.imshow(PREVIEW_WINDOW, preview)
-                key = cv2.waitKey(1) & 0xFF
+                t_key = time.perf_counter()
+                timer.add("pv_show", t_key - t_show)
+                # pollKey paints the window and reads keys without sleeping; waitKey(1) sleeps until the next
+                # timer tick (measured 1.4-8.7 ms per shown frame here)
+                key = poll_key() & 0xFF
+                timer.add("pv_key", time.perf_counter() - t_key)
                 if key in (ord("q"), ord("Q")):
                     log.info("Quit requested.")
                     break
@@ -405,7 +450,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                         vanish_on = want_vanish = False  # capture needs the raw feed; vcam keeps showing it live
                         if lock:
                             lock.release()  # back to auto; the countdown and settle time let it adapt
-                        capture.start(now)
+                        capture.start(now, force=_shift_held())  # Shift+B: capture without the person check
                 if key in (ord("s"), ord("S")):
                     if shots:
                         shot_no += 1
@@ -486,9 +531,9 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                              "empty in %d frames", st.diff_frames, st.guard_frames_any, st.guard_frames,
                              st.guard_cells / max(st.guard_frames_any, 1), st.large_blob_frames, st.seg_empty)
                     log.info("plate refresh: %d passes, each blended %.0f%% of the frame (alpha %.3f per frame, outside "
-                             "the near-me zone + %d px) | paused %d (segmenter saw nobody) | plate health: %s",
+                             "the mask + %d px) | paused %d (segmenter saw nobody) | plate health: %s",
                              st.refresh_n, st.refresh_coverage / max(st.refresh_n, 1) * 100,
-                             cfg.vanish.plate_refresh_alpha, cfg.vanish.plate_refresh_guard_px, st.refresh_paused,
+                             cfg.vanish.plate_refresh_alpha, cfg.vanish.plate_refresh_margin_px, st.refresh_paused,
                              monitor.health.describe() if monitor.health else "not judged yet")
                     vmask.stats.reset()
                 timer.reset()

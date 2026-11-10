@@ -253,3 +253,34 @@ class HealthMonitor:
 
     def tripped(self, now: float) -> bool:
         return self.failing_since is not None and now - self.failing_since >= self.fail_s
+
+
+class StalenessNudge:
+    """Soft warning, separate from the hard limit: the residual has stayed above `residual` for
+    `hold_s` while vanished, so the light has probably changed and a new plate would look better.
+    Vanish stays on. `update()` returns True once per episode (time to beep); `showing` stays True
+    until the residual has dropped back under 80% of the limit."""
+
+    def __init__(self, residual: float, hold_s: float):
+        self.residual, self.hold_s = residual, hold_s
+        self.reset()
+
+    def reset(self) -> None:
+        self.above_since: float | None = None
+        self.showing = False
+
+    def update(self, health: PlateHealth | None, now: float, vanished: bool) -> bool:
+        if not vanished:
+            self.reset()
+            return False
+        if health is None:
+            return False
+        if health.residual > self.residual:
+            if self.above_since is None:
+                self.above_since = now
+        elif health.residual < 0.8 * self.residual:
+            self.reset()
+        if self.above_since is not None and not self.showing and now - self.above_since >= self.hold_s:
+            self.showing = True
+            return True
+        return False

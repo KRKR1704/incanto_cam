@@ -55,6 +55,7 @@ class PerceptionConfig:
 @dataclass(frozen=True)
 class PreviewConfig:
     every_n: int = 2
+    scale: float = 0.5                   # preview window size relative to the camera frame (the vcam output is never scaled)
 
 
 @dataclass(frozen=True)
@@ -93,8 +94,8 @@ class VanishConfig:
     plate_match_cells_y: int = 6
     plate_match_smoothing: float = 0.15  # weight of each frame's estimate in the running gain/offset
     match_margin_px: int = 30            # background used for matching is this far outside the mask
-    plate_refresh_alpha: float = 0.02    # per frame: blend live pixels into the plate OUTSIDE the near-me zone (0 = off)
-    plate_refresh_guard_px: int = 40     # the refresh stays this much further out than the near-me zone
+    plate_refresh_alpha: float = 0.02    # per frame: blend live pixels into the plate around the mask (0 = off)
+    plate_refresh_margin_px: int = 15    # the refresh stays this far outside the mask (every source, plus feather)
 
 
 @dataclass(frozen=True)
@@ -104,6 +105,8 @@ class PlateConfig:
     settle_s: float = 1.0                # extra wait for auto exposure to settle on the empty room
     max_person_coverage: float = 0.02    # abort if the mask covers more than this fraction of the frame
     dir: str = "plates"                  # local-only (gitignored): a photo of your room
+    static_blob_max_motion: float = 0.02  # capture: a segmenter blob with a smaller share of moving pixels is furniture
+    debug_dir: str = "docs/evidence/phase-3"  # local-only (images there are gitignored): aborted-capture debug images
     sounds: bool = True                  # beeps for countdown / capturing / captured / error (winsound, Windows only)
     # Plate health, judged AFTER gain-map matching (exposure swings are not a plate problem); see plate/health.py.
     health_max_residual: float = 3.5     # mean over cells of |cell-mean (live - matched plate)|, levels
@@ -114,6 +117,8 @@ class PlateConfig:
     health_hysteresis: float = 0.2       # after a failure, pass only with this much margin inside the limits
     health_check_s: float = 0.5          # how often the plate is checked against the room
     health_fail_s: float = 3.0           # while vanish is on: failing for this long switches vanish off
+    health_nudge_residual: float = 2.0   # softer limit: above it for health_nudge_s, suggest a new plate (vanish stays on)
+    health_nudge_s: float = 10.0
     # Exposure lock: after a capture in auto mode, fix the exposure so it cannot swing while the plate is in use.
     lock_exposure: bool = True
     lock_exposure_tolerance: float = 0.25  # lock only if live brightness gets within this fraction of the plate's
@@ -121,6 +126,10 @@ class PlateConfig:
 
     def resolve_dir(self) -> Path:
         path = Path(self.dir)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+    def resolve_debug_dir(self) -> Path:
+        path = Path(self.debug_dir)
         return path if path.is_absolute() else PROJECT_ROOT / path
 
 
@@ -249,6 +258,8 @@ def load_config(path: str | Path | None = None) -> Config:
 
     if preview.every_n < 1:
         raise ConfigError("preview.every_n must be >= 1")
+    if not 0.25 <= preview.scale <= 1:
+        raise ConfigError("preview.scale must be between 0.25 and 1")
 
     if vanish.mask_mode not in VANISH_MASK_MODES:
         raise ConfigError(f"vanish.mask_mode must be one of {VANISH_MASK_MODES}, got '{vanish.mask_mode}'")
@@ -258,7 +269,7 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError(f"vanish.plate_diff_metric must be one of {PLATE_DIFF_METRICS}, got '{vanish.plate_diff_metric}'")
     for key in ("dilate_px", "hand_hull_dilate_px", "core_close_px", "outer_feather_px", "plate_diff_open_px",
                 "plate_diff_close_px", "match_margin_px", "plate_diff_threshold", "near_me_px",
-                "plate_diff_wash_residual", "plate_refresh_guard_px"):
+                "plate_diff_wash_residual", "plate_refresh_margin_px"):
         if getattr(vanish, key) < 0:
             raise ConfigError(f"vanish.{key} must be >= 0")
     if not (1 <= vanish.plate_match_cells_x <= 64 and 1 <= vanish.plate_match_cells_y <= 64):
@@ -284,6 +295,10 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError("plate.max_person_coverage must be between 0 and 1")
     if plate.health_max_residual <= 0:
         raise ConfigError("plate.health_max_residual must be > 0")
+    if plate.health_nudge_residual <= 0 or plate.health_nudge_s < 0:
+        raise ConfigError("plate.health_nudge_residual must be > 0 and plate.health_nudge_s >= 0")
+    if not 0 <= plate.static_blob_max_motion <= 1:
+        raise ConfigError("plate.static_blob_max_motion must be between 0 and 1 (0 = every blob counts as a person)")
     if not -1 <= plate.health_min_structure < 1:
         raise ConfigError("plate.health_min_structure must be in [-1, 1)")
     if not 0 < plate.health_gain_min < 1 < plate.health_gain_max:

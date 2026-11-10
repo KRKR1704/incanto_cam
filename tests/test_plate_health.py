@@ -8,7 +8,9 @@ import pytest
 from incanto.config import PlateConfig, VanishConfig
 from incanto.io.sounds import CUES, SoundCues
 from incanto.plate.clean_plate import PlateCapture
-from incanto.plate.health import HealthLimits, HealthMonitor, measure_plate_health
+from incanto.plate.health import (HealthLimits, HealthMonitor, PlateHealth, StalenessNudge,
+                                  measure_plate_health)
+from incanto.perception.hands import Hand
 from incanto.render.vanish_mask import REFRESH_EVERY, VanishMask
 
 W, H = 640, 360
@@ -257,16 +259,16 @@ def test_vanish_mask_check_health_works_before_vanish_is_on():
     assert not moved.check_health(live, person_seg(), [], LIMITS).ok
 
 
-# -- background refresh ------------------------------------------------------------------------
+# -- background refresh: up to the mask + a small margin ------------------------------------------
 
-def refresh_run(live, seg, frames=40, mode="full", **cfg_kw):
+def refresh_run(live, seg, frames=40, mode="full", hands=(), **cfg_kw):
     """Run compute() + refresh_plate() for `frames` frames; returns (mask object, original plate, last result)."""
     plate = make_plate()
     v = VanishMask(dataclasses.replace(VanishConfig(), mask_mode=mode, **cfg_kw), (W, H), (W, H))
     v.set_plate(plate)
     r = None
     for _ in range(frames):
-        r = v.compute(live, seg, [])
+        r = v.compute(live, seg, list(hands))
         v.refresh_plate(live)
     return v, plate, r
 
@@ -278,35 +280,51 @@ def drifted_scene(gain=1.08):
     return live
 
 
-def zone_px(v, seg):
-    """The near-me zone for `seg`, recomputed independently of the refresh code path."""
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * round(v.cfg.dilate_px * 0.5) + 1,) * 2)
-    grown = cv2.dilate((seg > 0).astype(np.uint8), k)
-    r = round(v.cfg.near_me_px * 0.5)  # config px are at 1280 wide; these tests run at 640
-    return cv2.dilate(grown, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
+def grow(binary, px):
+    return cv2.dilate(binary.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * px + 1, 2 * px + 1))) > 0
+
+
+def full_mask(r):
+    out = np.zeros((H, W), np.float32)
+    if r.roi:
+        x0, y0, x1, y1 = r.roi
+        out[y0:y1, x0:x1] = r.mask
+    return out
+
+
+MARGIN = round(VanishConfig().plate_refresh_margin_px * 0.5)  # config px are at 1280 wide; these tests run at 640
 
 
 @pytest.mark.parametrize("mode", ["full", "seg_hands", "seg_only"])
-def test_refresh_never_touches_the_near_me_zone(mode):
+def test_refresh_never_touches_the_mask_or_its_margin(mode):
     live, seg = drifted_scene(), person_seg()
     v, plate, r = refresh_run(live, seg, mode=mode)
     assert v.stats.refresh_n == 40 // REFRESH_EVERY
     changed = (v.plate != plate).any(axis=2)
     assert changed.any()
-    zone = zone_px(v, seg)
-    assert not changed[zone].any()                       # inside the zone the plate is exactly as captured
-    assert not changed[120:300, 260:380].any()           # ...and of course under me
-    if mode == "full":
-        assert not changed[r.zone > 0].any()             # the zone the mask itself used
-    # the guard: nothing within plate_refresh_guard_px beyond the zone either
-    g = round(v.cfg.plate_refresh_guard_px * 0.5)
-    guard = cv2.dilate(zone.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * g + 1, 2 * g + 1))) > 0
-    assert not changed[guard].any()
-    # the plate handed to the caller is not modified in place
-    assert (plate == make_plate()).all()
+    mask = full_mask(r) > 0                               # the finished mask, feather included
+    assert mask[120:300, 260:380].all()
+    assert not changed[grow(mask, MARGIN)].any()          # under the mask and in the margin: exactly as captured
+    for source in (r.seg, r.grown, r.hull, r.diff):       # every single source, each with the margin
+        assert not changed[grow(source > 0, MARGIN)].any()
+    assert (plate == make_plate()).all()                  # the plate handed to the caller is not modified in place
 
 
-def test_refresh_moves_the_far_background_toward_live_slowly():
+def test_refresh_reaches_close_to_me():
+    """The point of the change: the area right around me follows the light. The old rule kept
+    everything within near_me_px + 40 px (55 px at this size) of the mask frozen."""
+    live, seg = drifted_scene(), person_seg()
+    v, plate, r = refresh_run(live, seg)
+    changed = (v.plate != plate).any(axis=2)
+    mask = full_mask(r) > 0
+    near = grow(mask, 34) & ~grow(mask, 24)   # a ring 24-34 px outside the mask (48-68 px at 1280 wide)
+    assert near.sum() > 3000 and changed[near].mean() > 0.95
+    old_frozen = grow(seg > 0, 8 + 35 + 20)   # grown segmenter + near_me_px + the old 40 px guard
+    assert changed[old_frozen & ~grow(mask, 24)].mean() > 0.95
+    assert v.stats.refresh_coverage / v.stats.refresh_n > 0.6  # most of the frame now (it was ~0.35 in the live run)
+
+
+def test_refresh_moves_the_background_toward_live_slowly():
     live, seg = drifted_scene(), person_seg()
     v, plate, _ = refresh_run(live, seg, frames=REFRESH_EVERY)  # exactly one pass = 4 frames' worth
     far = (slice(20, 80), slice(20, 120))
@@ -314,10 +332,41 @@ def test_refresh_moves_the_far_background_toward_live_slowly():
     assert step == pytest.approx(1 - 0.98 ** REFRESH_EVERY, abs=0.03)   # ~0.02 per frame
     v, plate, _ = refresh_run(live, seg, frames=400)
     assert np.abs(v.plate[far].astype(int) - live[far]).max() <= 1      # converged after a few hundred frames
-    assert v.stats.refresh_coverage / v.stats.refresh_n > 0.3           # coverage is logged
 
 
-def test_refresh_follows_the_zone_when_i_move():
+def test_refresh_needs_every_source_to_agree_it_is_background():
+    live, seg = drifted_scene(), person_seg()
+    # a hand held out to the side: only the hand-hull source covers it (and it looks like the wall)
+    hand = Hand("Right", 0.9, np.stack([0.8 + 0.04 * np.cos(np.linspace(0, 6.28, 21)),
+                                        0.3 + 0.04 * np.sin(np.linspace(0, 6.28, 21)), np.zeros(21)], axis=1).astype(np.float32))
+    v, plate, r = refresh_run(live, seg, mode="seg_hands", hands=[hand])
+    changed = (v.plate != plate).any(axis=2)
+    assert (r.hull > 0).sum() > 500 and not changed[grow(r.hull > 0, MARGIN)].any()
+    # part of me the segmenter misses, found only by the plate difference (full mode)
+    live2 = live.copy()
+    live2[150:260, 380:420] = (30, 220, 60)
+    v, plate, r = refresh_run(live2, seg, mode="full")
+    changed = (v.plate != plate).any(axis=2)
+    assert (r.diff[150:260, 384:416] > 0).all()
+    assert not changed[150:260, 380:420].any() and not changed[grow(r.diff > 0, MARGIN)].any()
+
+
+def test_refresh_only_where_the_pixel_matches_the_matched_plate():
+    """All sources say background, but the pixel is not the wall (someone or something the segmenter
+    cannot see): it must not be burned into the plate, however close to or far from me."""
+    live, seg = drifted_scene(), person_seg()
+    live[150:260, 420:450] = (20, 20, 230)   # 40 px beside me: outside the mask and its margin
+    live[40:140, 540:600] = (20, 20, 230)    # far away
+    v, plate, r = refresh_run(live, seg, mode="seg_only")  # no plate-difference source: only the match rule protects
+    assert not (full_mask(r)[150:260, 420:450] > 0).any()
+    for region in ((slice(150, 260), slice(420, 450)), (slice(40, 140), slice(540, 600))):
+        assert (v.plate[region] == plate[region]).all()
+    assert (v.plate[20:80, 20:120] != plate[20:80, 20:120]).any()  # ordinary background still refreshes
+    # a brightness drift that matches after gain matching IS refreshed, even though raw live != raw plate
+    assert abs(float(live[20:80, 20:120].mean()) - float(plate[20:80, 20:120].mean())) > 5
+
+
+def test_refresh_follows_the_mask_when_i_move():
     live_a, seg_a = drifted_scene(), person_seg()
     plate = make_plate()
     v = VanishMask(VanishConfig(), (W, H), (W, H))
@@ -330,19 +379,11 @@ def test_refresh_follows_the_zone_when_i_move():
         live, seg = (live_a, seg_a) if i < 40 else (live_b, seg_b)
         if i == 40:
             before = v.plate.copy()
-        v.compute(live, seg, [])
+        r = v.compute(live, seg, [])
         v.refresh_plate(live)
-    new_zone = zone_px(v, seg_b)
-    assert (v.plate[new_zone] == before[new_zone]).all()  # frozen from the moment I stand there
-
-
-def test_refresh_skips_things_that_differ_from_the_plate():
-    """Someone the segmenter does not see (far from the zone) must not be burned into the plate."""
-    live, seg = drifted_scene(), person_seg()
-    live[40:140, 520:600] = (20, 20, 230)  # second person / pet / moved chair, not segmented
-    v, plate, _ = refresh_run(live, seg)
-    assert (v.plate[40:140, 520:600] == plate[40:140, 520:600]).all()
-    assert (v.plate[20:80, 20:120] != plate[20:80, 20:120]).any()  # ordinary background still refreshes
+    under_me = grow(seg_b > 0, 8)
+    assert (v.plate[under_me] == before[under_me]).all()  # frozen from the moment I stand there
+    assert (v.plate[120:300, 300:340] != before[120:300, 300:340]).any()  # where I was is refreshed again
 
 
 def test_refresh_pauses_when_the_segmenter_sees_nobody():
@@ -363,32 +404,69 @@ def test_refresh_off_with_alpha_zero_and_reset_by_a_new_plate():
     assert v.refresh_plate(live) is False  # nothing to refresh from until compute() has run again
 
 
+# -- staleness nudge --------------------------------------------------------------------------
+
+def health_with(residual):
+    return PlateHealth(residual, residual * 3, 0.9, 1.0, 30, 0.6, ())
+
+
+def test_nudge_after_ten_seconds_above_the_soft_limit_and_only_once():
+    assert (PlateConfig().health_nudge_residual, PlateConfig().health_nudge_s) == (2.0, 10.0)
+    n = StalenessNudge(residual=2.0, hold_s=10.0)
+    fired = [n.update(health_with(2.6), t * 0.5, True) for t in range(40)]  # 20 s above the limit
+    assert fired.count(True) == 1 and fired.index(True) == 20               # at 10.0 s, a single beep
+    assert n.showing
+    assert n.update(health_with(1.9), 21.0, True) is False and n.showing    # 1.9 is not clearly below: keep showing
+    assert n.update(health_with(1.5), 21.5, True) is False and not n.showing  # under 80% of the limit: cleared
+    assert not any(n.update(health_with(2.6), 22.0 + t * 0.5, True) for t in range(19))
+    assert n.update(health_with(2.6), 32.0, True) is True                   # a new episode nudges again
+
+
+def test_nudge_needs_vanish_on_and_a_sustained_residual():
+    n = StalenessNudge(2.0, 10.0)
+    assert not any(n.update(health_with(3.0), t, False) for t in range(30))  # not vanished: never
+    for t in range(30):  # dips under the limit every 8 s: never 10 s in a row
+        assert n.update(health_with(1.0 if t % 8 == 0 else 2.5), float(t), True) is False
+    n.reset()
+    n.update(health_with(2.5), 100.0, True)
+    assert n.update(None, 105.0, True) is False and n.above_since == 100.0   # an unjudged frame changes nothing
+    assert n.update(health_with(2.5), 111.0, True) is True
+    n.update(health_with(2.5), 112.0, False)                                 # vanish switched off: reset
+    assert not n.showing and n.above_since is None
+    assert "nudge" in CUES and len(CUES["nudge"]) == 1                       # a single soft beep
+
+
 # -- audio cues --------------------------------------------------------------------------------
 
-def capture_events(mask_value, countdown_s=5.0):
+def capture_events(person, countdown_s=5.0):
     cap = PlateCapture(frames=5, countdown_s=countdown_s, settle_s=1.0, max_coverage=0.02)
     cap.start(0.0)
-    events, t = cap.pop_events(), 0.0
-    mask = np.full((36, 64), mask_value, np.float32)
-    frame = np.full((36, 64, 3), 80, np.uint8)
+    events, t, i = cap.pop_events(), 0.0, 0
     while t < 12 and cap.state not in (cap.DONE, cap.ABORTED):
         t += 1 / 30
+        i += 1
+        frame = np.full((90, 160, 3), 80, np.uint8)
+        mask = np.zeros((90, 160), np.float32)
+        if person:  # someone pacing through the frame
+            x = 20 + (i * 3) % 100
+            frame[20:80, x:x + 30] = 200
+            mask[20:80, x:x + 30] = 1.0
         cap.update(frame, mask, t)
         events += cap.pop_events()
     return cap, events
 
 
 def test_one_tick_per_countdown_second_then_capturing():
-    cap, events = capture_events(0.0)
+    cap, events = capture_events(False)
     assert cap.state == cap.DONE
     assert events == ["tick"] * 5 + ["capturing"]
     assert cap.pop_events() == []
-    _, events = capture_events(0.0, countdown_s=3.0)
+    _, events = capture_events(False, countdown_s=3.0)
     assert events == ["tick"] * 3 + ["capturing"]
 
 
 def test_abort_emits_the_error_cue():
-    cap, events = capture_events(1.0)
+    cap, events = capture_events(True)
     assert cap.state == cap.ABORTED
     assert events == ["tick"] * 5 + ["capturing", "error"]
 

@@ -61,7 +61,17 @@ def test_capture_sequence_countdown_settle_then_capture():
 
 
 def test_capture_aborts_when_person_visible():
-    cap, _, _ = run_capture(1.0)
+    cap = PlateCapture(frames=5, countdown_s=3.0, settle_s=1.0, max_coverage=0.02)
+    cap.start(0.0)
+    t, i = 0.0, 0
+    while t < 10 and cap.state not in (cap.DONE, cap.ABORTED):
+        t += 0.1
+        i += 1
+        frame, mask = solid(80, 160, 90), np.zeros((90, 160), np.float32)
+        x = 20 + (i * 7) % 100  # a person moving about (a blob that never moves is furniture, see test_capture_check)
+        frame[20:80, x:x + 30] = 200
+        mask[20:80, x:x + 30] = 1.0
+        cap.update(frame, mask, t)
     assert cap.state == cap.ABORTED
     assert "NOT saved" in cap.abort_reason
     with pytest.raises(ValueError):

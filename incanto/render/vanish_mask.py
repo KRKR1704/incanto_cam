@@ -19,8 +19,9 @@ All mask work happens at perception resolution; the finished mask is upscaled on
 
 Two guards keep the plate honest: `check_health()` measures whether the plate still matches the
 visible background (the caller refuses vanish on a stale plate), and `refresh_plate()` slowly blends
-live pixels into the plate, but only well OUTSIDE the near-me zone, so it follows daylight during a
-call. Inside the zone the plate stays exactly as captured.
+live pixels into the plate so it follows daylight during a call: everywhere except the mask itself
+plus a small margin, and only where every mask source says "background" and the pixel still matches
+the gain-matched plate. Under the mask the plate stays exactly as captured.
 """
 from __future__ import annotations
 
@@ -108,9 +109,9 @@ class VanishMask:
         self._k_margin = _ellipse(max(1, round(cfg.match_margin_px * s / MATCH_STRIDE)))
         self._k_zone = _ellipse(max(1, round(cfg.near_me_px * s / MATCH_STRIDE)))
         # +1: the refresh mask is built at 1/MATCH_STRIDE resolution, so round outward by one of its pixels
-        self._k_refresh = _ellipse(round(cfg.plate_refresh_guard_px * s / MATCH_STRIDE) + 1)
+        self._k_refresh = _ellipse(round(cfg.plate_refresh_margin_px * s / MATCH_STRIDE) + 1)
         self._plate_f32: np.ndarray | None = None  # full-res float plate, created on the first refresh
-        self._refresh_state: tuple | None = None   # (small, zone, seg_empty) of the latest compute()
+        self._refresh_state: tuple | None = None   # (small, sources, alpha, seg_empty) of the latest compute()
         # The core and its feather ring are built at HALF the perception resolution (cheaper; the
         # result is upsampled anyway), so their sizes are halved here.
         self._k_core_close = _ellipse(round(cfg.core_close_px * s / 2))
@@ -472,20 +473,24 @@ class VanishMask:
         return measure_plate_health(small, self._plate_small, covered, limits, self._cells,
                                     margin_px=round(self.cfg.match_margin_px * self._scale), recovering=recovering)
 
-    def _refresh_allowed(self, small: np.ndarray, zone: np.ndarray) -> np.ndarray:
+    def _refresh_allowed(self, small: np.ndarray, sources: np.ndarray, alpha: np.ndarray) -> np.ndarray:
         """uint8 0/1 at 1/MATCH_STRIDE of the perception size: where live may be blended into the plate.
 
-        Never inside the near-me zone grown by `plate_refresh_guard_px`, and never where the live pixel
-        differs from the matched plate by more than the plate-difference threshold: daylight drifts
-        gradually, while a person (or pet, or moved chair) the segmenter missed differs a lot and must
-        not be burned into the plate."""
+        A pixel is refreshed only if BOTH hold:
+        * every mask source agrees it is background: it is outside the segmenter mask (grown), the hand
+          hulls, the plate-difference mask (including its slow release) and the finished mask with its
+          feather, all grown by `plate_refresh_margin_px`;
+        * it still matches the gain-matched plate within the plate-difference threshold. Daylight drifts
+          gradually; a person (or pet, or moved chair) the segmenter missed differs a lot and must not
+          be burned into the plate.
+        `sources` is the union of the sources at perception size, `alpha` the finished mask."""
         w, h = self.small_size
         q = (max(1, w // MATCH_STRIDE), max(1, h // MATCH_STRIDE))
 
         def any_pool(binary: np.ndarray) -> np.ndarray:  # 1 where any pixel of the block is set
             return (cv2.resize(binary.astype(np.float32), q, interpolation=cv2.INTER_AREA) > 0).astype(np.uint8)
 
-        keep = any_pool(zone > 0)
+        keep = any_pool(sources > 0) | any_pool(alpha > 0)
         if self._k_refresh is not None:
             keep = cv2.dilate(keep, self._k_refresh)
         differs = any_pool(self._difference(small, self._matched_small) > self.cfg.plate_diff_threshold)
@@ -494,20 +499,20 @@ class VanishMask:
 
     def refresh_plate(self, frame: np.ndarray) -> bool:
         """Blend the live `frame` (full resolution, the one compute() just saw downscaled) into the
-        plate outside the near-me zone. Call once per frame after compute(), only while the plate is
-        healthy. Returns True when a refresh pass ran."""
+        plate around the mask (see _refresh_allowed). Call once per frame after compute(), only while
+        the plate is healthy. Returns True when a refresh pass ran."""
         alpha = self.cfg.plate_refresh_alpha
         if alpha <= 0 or self._refresh_state is None or self._plate_u8 is None:
             return False
         if self._frame_no % REFRESH_EVERY != REFRESH_EVERY // 2:  # not on the frames that estimate the
             return False                                          # match or rebuild the full-res plate
-        small, zone, seg_empty = self._refresh_state
-        if seg_empty:  # nobody found: the zone cannot be trusted to protect you, so leave the plate alone
+        small, sources, mask_alpha, seg_empty = self._refresh_state
+        if seg_empty:  # nobody found: the mask cannot be trusted to protect you, so leave the plate alone
             self.stats.refresh_paused += 1
             return False
         if frame.shape != self._plate_u8.shape:
             raise ValueError(f"frame {frame.shape} does not match plate {self._plate_u8.shape}")
-        allowed = self._refresh_allowed(small, zone)
+        allowed = self._refresh_allowed(small, sources, mask_alpha)
         if self._plate_f32 is None:  # first refresh: work on our own copies, never on the caller's array
             self._plate_f32 = self._plate_u8.astype(np.float32)
             self._plate_u8 = self._plate_u8.copy()
@@ -561,14 +566,14 @@ class VanishMask:
             plate_small = self._matched_small
         with stage("vm_diff"):
             if cfg.mask_mode == "full":
-                zone = refresh_zone = self._near_me_zone(covered)
+                zone = self._near_me_zone(covered)
                 diff = self._diff_mask(small, plate_small, zone, covered)
             else:
                 zone = diff = zeros
-                refresh_zone = self._near_me_zone(covered) if cfg.plate_refresh_alpha > 0 else zeros
-            self._refresh_state = (small, refresh_zone, seg_empty)
         with stage("vm_core"):
-            alpha = self._solid_core_alpha(np.maximum(covered, diff))
+            sources = np.maximum(covered, diff)
+            alpha = self._solid_core_alpha(sources)
+            self._refresh_state = (small, sources, alpha, seg_empty)
         # Everything at full resolution happens only inside the bounding box of the mask.
         with stage("vm_up"):
             ys, xs = np.nonzero(alpha > 0.003)
