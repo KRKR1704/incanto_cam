@@ -181,7 +181,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 8.2 | Hotkey help overlay (`H`): B plate, R record, V vanish test, C cancel, D debug, Q quit | 8.1 | 10m | [ ] |
 | 8.3 | Graceful errors: no camera, no virtual camera driver (with a link to the OBS install), mic unavailable (falls back to visual-only gestures) | 1.2, 1.3, 4.1 | 25m | [ ] |
 | 8.4 | Warn when no clean plate exists and a plate-dependent spell is triggered | 3.4, 6.3 | 10m | [ ] |
-| 8.5 | Exposure drift check: compare the plate to live background edges, prompt to recapture if they drift too far | 3.4 | 25m | [ ] partially done: gain matching moved into 3.8; recapture prompt still open |
+| 8.5 | Exposure drift check: compare the plate to live background edges, prompt to recapture if they drift too far | 3.4 | 25m | [ ] partially done: gain matching moved into 3.8; recapture prompt done in Phase 3 as the plate health check (brightness and gain, not edges) |
 | 8.6 | Final FPS pass against the §8 budget; profile and fix the slowest stage | all | 30m | [ ] |
 | 8.7 | README: setup, OBS note, hotkeys, gesture → spell table, adding spells. No demo GIF/video of the user in the repo (host it outside GitHub, or use non-personal footage) | 7.6 | 30m | [ ] |
 | 8.8 | PyInstaller build → `dist/Incanto.exe` with MediaPipe model files bundled | 8.6 | 30m | [ ] |

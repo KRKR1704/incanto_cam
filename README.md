@@ -24,9 +24,11 @@ See `docs/incanto-project-plan.md` and `docs/incanto-build-tasks.md` for the pla
 
 ## Vanish test (Phase 3)
 
-Hotkeys work in the preview window: **B** captures a clean plate of the empty room (3 s countdown, leave the frame), **V** toggles vanish (applied to the virtual camera output too), **D** cycles the debug view (off, source colours, leak view where red shows you leaking through), **S** screenshot (with `--shots-dir`), **Q** quit.
+Hotkeys work in the preview window: **B** captures a clean plate of the empty room (5 s countdown with a beep per second, leave the frame; a long tone means frames are being taken, three rising notes mean it was saved, two falling low notes mean it was aborted and nothing changed), **V** toggles vanish (applied to the virtual camera output too), **D** cycles the debug view (off, source colours, leak view where red shows you leaking through), **S** screenshot (with `--shots-dir`), **Q** quit.
 
 `vanish.mask_mode` in `config.yaml` (or `--mask-mode`) picks what hides you: `seg_only` (segmenter), `seg_hands` (plus filled hand hulls) or `full` (plus pixels that differ from the brightness-matched plate). The plate is a photo of your room and is local-only (`plates/`, gitignored). Recapture it whenever furniture moves: in `full` mode anything that differs from the plate is replaced by the plate's version.
+
+**Plate health.** Vanish only runs on a plate that matches the room. When you press V, and about twice a second after that, the visible background is compared with the plate (raw brightness difference, global gain, largest per-cell gain; limits under `plate.health_*` in `config.yaml`). If it does not match, vanish is refused or switched off, the preview shows "Plate doesn't match the room - press B", a WARNING is logged and the error sound plays. A plate loaded from a previous session is flagged as such until it passes this check. While vanish is on and the plate is healthy, the plate is slowly refreshed from the live picture outside the near-me zone (`vanish.plate_refresh_alpha`), so it follows daylight during a call; around you it stays as captured. `plate.sounds: false` mutes the beeps.
 
 ## Camera dark after a crash? `--reset-camera`
 
