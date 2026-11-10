@@ -72,12 +72,23 @@ plate:                         # clean plate of the empty room (plates/ is local
   sounds: true                 # beeps: each countdown second, capturing, captured OK, error (Windows only)
   # Plate health: checked when you press V and continuously after. If the plate does not match the
   # visible background, vanish is refused / switched off and you are asked to press B.
-  health_max_raw_diff: 20.0    # |mean live background - mean plate background| in levels
-  health_gain_min: 0.8         # global live/plate gain (each colour channel) must be inside this range
-  health_gain_max: 1.25
-  health_max_cell_gain: 1.5    # no grid cell may need more gain than this
+  # The plate is judged AFTER gain-map matching, so auto-exposure swings do not count against it.
+  health_max_residual: 3.5     # mean over grid cells of |cell-mean (live - matched plate)| in levels (the log's
+                               # "per-cell residual mean|r|"). Measured here: ~1 fresh plate, up to 2.7 with a
+                               # 1.5x exposure change or a moved chair, 4.2-5.1 for the previous evening's plate
+  health_min_structure: 0.35   # edge (gradient) correlation of plate vs live, blind to brightness. Measured:
+                               # 0.95 unchanged, 0.54 chair moved + door opened, 0.2 camera shifted 2% of the width
+  health_gain_min: 0.5         # loose sanity cap on the global live/plate gain
+  health_gain_max: 2.0
+  health_min_cell_background: 0.5  # only cells with at least this share of background are judged
+  health_hysteresis: 0.2       # after a failed check, pass again only this far inside the limits
   health_check_s: 0.5          # seconds between checks
-  health_fail_s: 1.0           # while vanish is on, unhealthy for this long switches it off
+  health_fail_s: 3.0           # while vanish is on, failing for this long switches it off
+  lock_exposure: true          # after a capture in auto mode, sweep manual exposures (<= -5, so 30 fps holds),
+                               # lock the one closest to the plate's brightness; B returns to auto first
+  lock_exposure_tolerance: 0.25  # lock only if live gets within this fraction of the plate's brightness,
+                               # otherwise stay on auto
+  lock_exposure_settle_s: 0.7  # wait after each exposure change before measuring
 
 vcam:
   backend: obs                 # obs | unitycapture

@@ -105,13 +105,19 @@ class PlateConfig:
     max_person_coverage: float = 0.02    # abort if the mask covers more than this fraction of the frame
     dir: str = "plates"                  # local-only (gitignored): a photo of your room
     sounds: bool = True                  # beeps for countdown / capturing / captured / error (winsound, Windows only)
-    # Plate health: the plate must match the visible background, else vanish is refused / switched off.
-    health_max_raw_diff: float = 20.0    # |mean live background - mean plate background|, levels
-    health_gain_min: float = 0.8         # global live/plate gain (each colour channel) must stay inside
-    health_gain_max: float = 1.25        # ...this range
-    health_max_cell_gain: float = 1.5    # no grid cell may need more gain than this
+    # Plate health, judged AFTER gain-map matching (exposure swings are not a plate problem); see plate/health.py.
+    health_max_residual: float = 3.5     # mean over cells of |cell-mean (live - matched plate)|, levels
+    health_min_structure: float = 0.35   # gradient (edge) correlation of plate vs live; ignores brightness
+    health_gain_min: float = 0.5         # loose sanity cap on the global live/plate gain
+    health_gain_max: float = 2.0
+    health_min_cell_background: float = 0.5  # only cells with this share of background are judged
+    health_hysteresis: float = 0.2       # after a failure, pass only with this much margin inside the limits
     health_check_s: float = 0.5          # how often the plate is checked against the room
-    health_fail_s: float = 1.0           # while vanish is on: unhealthy for this long switches vanish off
+    health_fail_s: float = 3.0           # while vanish is on: failing for this long switches vanish off
+    # Exposure lock: after a capture in auto mode, fix the exposure so it cannot swing while the plate is in use.
+    lock_exposure: bool = True
+    lock_exposure_tolerance: float = 0.25  # lock only if live brightness gets within this fraction of the plate's
+    lock_exposure_settle_s: float = 0.7  # wait after each exposure change before measuring
 
     def resolve_dir(self) -> Path:
         path = Path(self.dir)
@@ -276,12 +282,20 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError("plate.countdown_s and plate.settle_s must be >= 0")
     if not 0 <= plate.max_person_coverage <= 1:
         raise ConfigError("plate.max_person_coverage must be between 0 and 1")
-    if plate.health_max_raw_diff <= 0 or plate.health_max_cell_gain <= 1:
-        raise ConfigError("plate.health_max_raw_diff must be > 0 and plate.health_max_cell_gain > 1")
+    if plate.health_max_residual <= 0:
+        raise ConfigError("plate.health_max_residual must be > 0")
+    if not -1 <= plate.health_min_structure < 1:
+        raise ConfigError("plate.health_min_structure must be in [-1, 1)")
     if not 0 < plate.health_gain_min < 1 < plate.health_gain_max:
         raise ConfigError("plate.health_gain_min must be in (0, 1) and plate.health_gain_max above 1")
+    if not 0 < plate.health_min_cell_background <= 1:
+        raise ConfigError("plate.health_min_cell_background must be in (0, 1]")
+    if not 0 <= plate.health_hysteresis < 1:
+        raise ConfigError("plate.health_hysteresis must be in [0, 1)")
     if plate.health_check_s <= 0 or plate.health_fail_s < 0:
         raise ConfigError("plate.health_check_s must be > 0 and plate.health_fail_s >= 0")
+    if not 0 < plate.lock_exposure_tolerance < 1 or plate.lock_exposure_settle_s < 0:
+        raise ConfigError("plate.lock_exposure_tolerance must be in (0, 1) and plate.lock_exposure_settle_s >= 0")
 
     mappings = _section(raw, "mappings")
     for gesture, spell in mappings.items():

@@ -32,7 +32,9 @@ import numpy as np
 
 from incanto.config import VanishConfig
 from incanto.perception.hands import Hand
-from incanto.plate.health import HealthLimits, PlateHealth, measure_plate_health
+from incanto.plate.health import (HealthLimits, PlateHealth, background_gain,
+                                  fill_missing_cells,  # noqa: F401 (re-exported)
+                                  measure_plate_health)
 
 REFERENCE_WIDTH = 1280  # config pixel sizes are defined at this frame width
 COVERED = 0.02          # mask value above which a pixel counts as covered when choosing background
@@ -91,22 +93,6 @@ def _ellipse(radius: int) -> np.ndarray | None:
     if radius <= 0:
         return None
     return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1, 2 * radius + 1))
-
-
-def fill_missing_cells(grid: np.ndarray, valid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Give every invalid cell the average of its valid 8-neighbours, repeating until all are filled."""
-    grid, valid = grid.copy(), valid.copy()
-    kernel = np.ones((3, 3), np.float32)
-    for _ in range(max(grid.shape[:2])):
-        if valid.all() or not valid.any():
-            break
-        vf = valid.astype(np.float32)
-        num = cv2.filter2D(grid * vf[..., None], -1, kernel, borderType=cv2.BORDER_CONSTANT)
-        den = cv2.filter2D(vf, -1, kernel, borderType=cv2.BORDER_CONSTANT)
-        new = (~valid) & (den > 0)
-        grid[new] = num[new] / den[new][:, None]
-        valid |= new
-    return grid, valid
 
 
 class VanishMask:
@@ -461,19 +447,30 @@ class VanishMask:
         """The current full-resolution plate (uint8), including any background refresh."""
         return self._plate_u8
 
-    def check_health(self, small: np.ndarray, seg_small: np.ndarray, hands: list[Hand],
-                     limits: HealthLimits) -> PlateHealth | None:
-        """Does the plate match the room right now? Works whether or not vanish is on.
-        None = no plate, or too little background visible to judge."""
-        if self._plate_small is None:
-            return None
+    def _covered(self, seg_small: np.ndarray, hands: list[Hand]) -> np.ndarray:
         covered = seg_small
         if self._k_grow is not None:
             covered = cv2.dilate((seg_small * 255.0).astype(np.uint8), self._k_grow).astype(np.float32) * (1.0 / 255.0)
         if hands:
             covered = np.maximum(covered, self._hull_mask(hands))
+        return covered
+
+    def background_gain(self, small: np.ndarray, seg_small: np.ndarray, hands: list[Hand]) -> float | None:
+        """Live background brightness relative to the plate (1.0 = equal); None if not measurable."""
+        if self._plate_small is None:
+            return None
+        return background_gain(small, self._plate_small, self._covered(seg_small, hands),
+                               margin_px=round(self.cfg.match_margin_px * self._scale))
+
+    def check_health(self, small: np.ndarray, seg_small: np.ndarray, hands: list[Hand],
+                     limits: HealthLimits, recovering: bool = False) -> PlateHealth | None:
+        """Does the plate, after gain matching, match the room right now? Works whether or not vanish
+        is on. None = no plate, or too few cells are mostly background to judge."""
+        if self._plate_small is None:
+            return None
+        covered = self._covered(seg_small, hands)
         return measure_plate_health(small, self._plate_small, covered, limits, self._cells,
-                                    margin_px=round(self.cfg.match_margin_px * self._scale))
+                                    margin_px=round(self.cfg.match_margin_px * self._scale), recovering=recovering)
 
     def _refresh_allowed(self, small: np.ndarray, zone: np.ndarray) -> np.ndarray:
         """uint8 0/1 at 1/MATCH_STRIDE of the perception size: where live may be blended into the plate.
