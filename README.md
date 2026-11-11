@@ -32,6 +32,10 @@ Hotkeys work in the preview window: **B** captures a clean plate of the empty ro
 
 **Exposure lock.** With `camera.exposure: auto` and `plate.lock_exposure: true`, a successful capture is followed by a short sweep of manual exposures (only -5 and shorter, so the camera keeps 30 fps). The one closest to the plate's brightness is locked while the plate is in use; B returns to auto first, captures, then locks again. If nothing gets within `plate.lock_exposure_tolerance` of the plate's brightness (a dim room needs a longer exposure than 30 fps allows) the camera stays on auto and the log says why. The lock goes through the same safety net as a manual exposure: auto is restored on every exit path.
 
+**Capture person check.** While you leave the frame, the capture watches every segmenter blob: one in which almost nothing moves during the last second (`plate.static_blob_max_motion`) is furniture, not you, and does not count towards `plate.max_person_coverage`. If the capture still aborts, a local-only debug image (`capture-abort-*.png`, in `plate.debug_dir`, never committed) shows what was counted: red = person, yellow = still blob ignored. **Shift+B** captures without the person check (a warning is logged).
+
+**Lighting nudge.** If the matched residual stays above `plate.health_nudge_residual` (2.0) for `plate.health_nudge_s` (10 s) while vanished, you get one soft beep and "Lighting changed - press B to refresh plate"; vanish stays on. The plate refresh now reaches up to the mask plus `vanish.plate_refresh_margin_px` (15 px), but only on pixels every mask source calls background and that still match the gain-matched plate. `preview.scale` (default 0.5) draws the preview window at half size; the virtual camera output is never scaled.
+
 ## Camera dark after a crash? `--reset-camera`
 
 The camera driver remembers a manual exposure across processes. Incanto restores auto exposure on every normal exit path (error, Ctrl+C, closing the window, SIGTERM, console close, interpreter exit). A hard kill (Task Manager, power loss) cannot be intercepted, so if your webcam looks dark in other apps, run:

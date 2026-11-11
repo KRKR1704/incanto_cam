@@ -295,6 +295,6 @@ def test_leak_view_is_red_where_output_differs_from_matched_plate():
     out[20:40, 30:60] = (100, 100, 180)                # a leaking patch
     preview = out.copy()
     overlay.draw_leak(preview, out, plate, (0, 0, 128, 72))
-    leak, clean = preview[30, 45], preview[60, 100]
+    leak, clean = preview[30, 45], preview[48, 100]  # row 48: above the legend text at the bottom
     assert leak[2] > 200 and leak[0] < 100            # strongly red
     assert clean[2] == 100 and clean[0] == 100        # untouched where output == plate
