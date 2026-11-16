@@ -63,6 +63,7 @@ class VanishResult:
     hull: np.ndarray
     diff: np.ndarray        # plate-difference mask after the near-me limit
     zone: np.ndarray        # float32 0..1 "near me" zone in which the plate difference is allowed
+    sources: np.ndarray | None = None  # perception-res union of every mask source (what the alpha is built from)
 
 
 class VanishStats:
@@ -125,6 +126,7 @@ class VanishMask:
         self._frame_no = 0
         self._estimates = 0
         self._matched_full: np.ndarray | None = None
+        self._matched_stamp = -1  # _frame_no at which _matched_full was last rebuilt
         self._matched_small: np.ndarray | None = None
         self.stats = VanishStats()
         self._reset_match()
@@ -145,6 +147,20 @@ class VanishMask:
         self._have_match = False
         self._matched_full = None
         self._matched_small = None
+
+    def snapshot_matched(self, small: np.ndarray, seg_small: np.ndarray, hands: list[Hand]) -> np.ndarray:
+        """Gain-match the plate to the live frame ONCE and return the full-resolution result (uint8).
+
+        Unsmoothed: the estimate is taken from this frame alone (background = outside the segmenter
+        mask and hand hulls, plus a margin), replacing the running estimate. If too little background is
+        visible the previous estimate stays. Used by the freeze style when vanish turns on, and for the
+        fresh match just before reappearing."""
+        had = self._have_match
+        self._have_match = False  # the first estimate is taken fully (no smoothing)
+        self._estimate_match(small, self._covered(seg_small, hands))
+        self._have_match = self._have_match or had
+        self._matched_small = self._matched_full = None  # running composites rebuild from the new estimate
+        return self._apply(self._plate_u8)
 
     def _apply(self, plate: np.ndarray, roi: tuple[int, int, int, int] | None = None) -> np.ndarray:
         """The plate with the current brightness/colour correction. `roi` = (x0, y0, x1, y1) in the
@@ -441,6 +457,7 @@ class VanishMask:
         """Forget the previous frames' difference mask and zone (call when vanish is switched on)."""
         self._prev_diff = self._prev_zone = self._guard_cut = None
         self._refresh_state = None
+        self._matched_small = None  # rebuilt from the current estimate on the next compute()
 
     # -- plate health and refresh --------------------------------------------------------------
     @property
@@ -473,7 +490,8 @@ class VanishMask:
         return measure_plate_health(small, self._plate_small, covered, limits, self._cells,
                                     margin_px=round(self.cfg.match_margin_px * self._scale), recovering=recovering)
 
-    def _refresh_allowed(self, small: np.ndarray, sources: np.ndarray, alpha: np.ndarray) -> np.ndarray:
+    def _refresh_allowed(self, small: np.ndarray, sources: np.ndarray, alpha: np.ndarray,
+                         exclude: np.ndarray | None = None) -> np.ndarray:
         """uint8 0/1 at 1/MATCH_STRIDE of the perception size: where live may be blended into the plate.
 
         A pixel is refreshed only if BOTH hold:
@@ -483,7 +501,9 @@ class VanishMask:
         * it still matches the gain-matched plate within the plate-difference threshold. Daylight drifts
           gradually; a person (or pet, or moved chair) the segmenter missed differs a lot and must not
           be burned into the plate.
-        `sources` is the union of the sources at perception size, `alpha` the finished mask."""
+        `sources` is the union of the sources at perception size, `alpha` the finished mask; `exclude`
+        (uint8, 1 = keep out, at 1/MATCH_STRIDE of the perception size) is an extra region where the
+        plate must not change (the region style's large soft region)."""
         w, h = self.small_size
         q = (max(1, w // MATCH_STRIDE), max(1, h // MATCH_STRIDE))
 
@@ -493,14 +513,16 @@ class VanishMask:
         keep = any_pool(sources > 0) | any_pool(alpha > 0)
         if self._k_refresh is not None:
             keep = cv2.dilate(keep, self._k_refresh)
+        if exclude is not None and exclude.shape == keep.shape:
+            keep |= exclude.astype(np.uint8)
         differs = any_pool(self._difference(small, self._matched_small) > self.cfg.plate_diff_threshold)
         keep |= cv2.dilate(differs, np.ones((3, 3), np.uint8))
         return 1 - keep
 
-    def refresh_plate(self, frame: np.ndarray) -> bool:
+    def refresh_plate(self, frame: np.ndarray, exclude: np.ndarray | None = None) -> bool:
         """Blend the live `frame` (full resolution, the one compute() just saw downscaled) into the
         plate around the mask (see _refresh_allowed). Call once per frame after compute(), only while
-        the plate is healthy. Returns True when a refresh pass ran."""
+        the plate is healthy. `exclude`: see _refresh_allowed. Returns True when a refresh pass ran."""
         alpha = self.cfg.plate_refresh_alpha
         if alpha <= 0 or self._refresh_state is None or self._plate_u8 is None:
             return False
@@ -512,7 +534,7 @@ class VanishMask:
             return False
         if frame.shape != self._plate_u8.shape:
             raise ValueError(f"frame {frame.shape} does not match plate {self._plate_u8.shape}")
-        allowed = self._refresh_allowed(small, sources, mask_alpha)
+        allowed = self._refresh_allowed(small, sources, mask_alpha, exclude)
         if self._plate_f32 is None:  # first refresh: work on our own copies, never on the caller's array
             self._plate_f32 = self._plate_u8.astype(np.float32)
             self._plate_u8 = self._plate_u8.copy()
@@ -529,6 +551,18 @@ class VanishMask:
         if self._matched_full is None:
             self._matched_full = self._apply(self._plate_u8)
         return self._matched_full
+
+    def _current_matched(self) -> np.ndarray:
+        """Full-res matched plate, rebuilt every APPLY_EVERY-th frame (the gain drifts slowly)."""
+        if self._matched_full is None or (self._frame_no % APPLY_EVERY == 0 and self._matched_stamp != self._frame_no):
+            self._matched_full = self._apply(self._plate_u8)
+            self._matched_stamp = self._frame_no
+        return self._matched_full
+
+    def matched_plate_roi(self, roi: tuple[int, int, int, int]) -> np.ndarray:
+        """The current matched plate inside roi = (x0, y0, x1, y1) (output pixels); call after compute()."""
+        x0, y0, x1, y1 = roi
+        return np.ascontiguousarray(self._current_matched()[y0:y1, x0:x1])
 
     def compute(self, small: np.ndarray, seg_small: np.ndarray, hands: list[Hand],
                 timer=None) -> VanishResult:
@@ -578,7 +612,7 @@ class VanishMask:
         with stage("vm_up"):
             ys, xs = np.nonzero(alpha > 0.003)
             if len(xs) == 0:
-                return VanishResult(zeros[:0, :0], self._plate_u8[:0, :0], None, seg_small, grown, hull, diff, zone)
+                return VanishResult(zeros[:0, :0], self._plate_u8[:0, :0], None, seg_small, grown, hull, diff, zone, sources)
             sh, sw = alpha.shape
             x0, x1 = max(0, int(xs.min()) - ROI_PAD), min(sw, int(xs.max()) + 1 + ROI_PAD)
             y0, y1 = max(0, int(ys.min()) - ROI_PAD), min(sh, int(ys.max()) + 1 + ROI_PAD)
@@ -588,7 +622,5 @@ class VanishMask:
             mask = cv2.resize(np.ascontiguousarray(alpha[y0:y1, x0:x1]), (roi[2] - roi[0], roi[3] - roi[1]),
                               interpolation=cv2.INTER_LINEAR)
         with stage("vm_plate"):
-            if self._matched_full is None or self._frame_no % APPLY_EVERY == 0:
-                self._matched_full = self._apply(self._plate_u8)
-            plate_roi = np.ascontiguousarray(self._matched_full[roi[1]:roi[3], roi[0]:roi[2]])
-        return VanishResult(mask, plate_roi, roi, seg_small, grown, hull, diff, zone)
+            plate_roi = self.matched_plate_roi(roi)
+        return VanishResult(mask, plate_roi, roi, seg_small, grown, hull, diff, zone, sources)

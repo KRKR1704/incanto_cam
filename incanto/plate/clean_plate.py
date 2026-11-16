@@ -18,6 +18,10 @@ log = logging.getLogger(__name__)
 
 PLATE_IMAGE = "plate.png"
 PLATE_META = "plate.json"
+PLATE_NOISE = "plate-noise.png"   # per-pixel temporal noise (std over the capture frames), local-only like the plate
+NOISE_QUANT = 16.0                # stored as std * 16 in a uint8 PNG: 1/16 level resolution, up to 15.9 levels
+NOISE_MAX = 255.0 / NOISE_QUANT
+NOISE_SMOOTH_PX = 5               # the per-pixel std of 30 frames is itself noisy (+-13%): box-smooth it
 PERSON_THRESHOLD = 0.5  # mask value above which a pixel counts as "person" for coverage checks
 ABORT_IMAGE_PREFIX = "capture-abort"
 # Static-blob check (measured on this camera: a person sitting still shows recent motion in 6-40% of
@@ -29,19 +33,36 @@ MIN_BLOB = 0.003        # segmenter blobs smaller than this fraction of the fram
 
 
 class PlateAccumulator:
-    """Running sum of BGR frames; `result()` is their mean as a float32 plate at full resolution."""
+    """Running sum of BGR frames; `result()` is their mean as a float32 plate at full resolution.
+    Also keeps the sum of squares so `noise()` can give the per-pixel temporal std (the camera grain)."""
 
     def __init__(self) -> None:
         self._sum: np.ndarray | None = None
+        self._sumsq: np.ndarray | None = None
         self.count = 0
 
     def add(self, frame: np.ndarray) -> None:
         if self._sum is None:
             self._sum = np.zeros(frame.shape, np.float32)
+            self._sumsq = np.zeros(frame.shape, np.float32)
         elif frame.shape != self._sum.shape:
             raise ValueError(f"frame shape {frame.shape} != plate shape {self._sum.shape}")
         cv2.accumulate(frame, self._sum)
+        cv2.accumulateSquare(frame, self._sumsq)
         self.count += 1
+
+    def noise(self) -> np.ndarray | None:
+        """Per-pixel, per-channel temporal std over the frames (float32 levels, lightly smoothed
+        spatially, capped at what the stored profile can hold); None with fewer than 2 frames."""
+        if self._sum is None or self.count < 2:
+            return None
+        n = np.float32(self.count)
+        mean = self._sum / n
+        var = np.maximum(self._sumsq / n - mean * mean, 0.0) * (n / (n - 1.0))  # unbiased
+        std = np.sqrt(var)
+        if NOISE_SMOOTH_PX > 1:
+            std = cv2.blur(std, (NOISE_SMOOTH_PX, NOISE_SMOOTH_PX))
+        return np.minimum(std, NOISE_MAX).astype(np.float32)
 
     def result(self) -> np.ndarray:
         if self._sum is None or self.count == 0:
@@ -115,25 +136,28 @@ class PlateMeta:
     mean_brightness: float        # 0-255, mean over all pixels and channels
     timestamp: str                # UTC, ISO 8601
     peak_person_coverage: float   # worst mask coverage seen during the capture
+    has_noise: bool = False       # a noise profile (plate-noise.png) was stored with this plate
 
 
 @dataclass
 class Plate:
     data: np.ndarray              # float32 BGR, full output resolution
     meta: PlateMeta
+    noise: np.ndarray | None = None  # float32 BGR per-pixel temporal std (levels) from the capture; None = unknown
 
     def __post_init__(self) -> None:
         self.u8 = np.clip(self.data + 0.5, 0, 255).astype(np.uint8)  # what the compositor blends
 
 
-def make_plate(data: np.ndarray, frames: int, exposure: float | None, peak_coverage: float) -> Plate:
+def make_plate(data: np.ndarray, frames: int, exposure: float | None, peak_coverage: float,
+               noise: np.ndarray | None = None) -> Plate:
     h, w = data.shape[:2]
     meta = PlateMeta(width=w, height=h, frames=frames,
                      exposure_mode="auto" if exposure is None else "manual", exposure_value=exposure,
                      mean_brightness=float(data.mean()),
                      timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                     peak_person_coverage=peak_coverage)
-    return Plate(data, meta)
+                     peak_person_coverage=peak_coverage, has_noise=noise is not None)
+    return Plate(data, meta, noise)
 
 
 def save_plate(plate: Plate, directory: Path) -> Path:
@@ -141,6 +165,13 @@ def save_plate(plate: Plate, directory: Path) -> Path:
     image = directory / PLATE_IMAGE
     if not cv2.imwrite(str(image), plate.u8):  # lossless PNG
         raise OSError(f"could not write {image}")
+    noise_path = directory / PLATE_NOISE
+    if plate.noise is not None:
+        q = np.clip(plate.noise * NOISE_QUANT + 0.5, 0, 255).astype(np.uint8)
+        if not cv2.imwrite(str(noise_path), q):
+            raise OSError(f"could not write {noise_path}")
+    elif noise_path.exists():
+        noise_path.unlink()  # never leave the previous plate's profile next to a new plate
     (directory / PLATE_META).write_text(json.dumps(asdict(plate.meta), indent=2), encoding="utf-8")
     return image
 
@@ -163,7 +194,15 @@ def load_plate(directory: Path, width: int, height: int) -> Plate | None:
     if data is None or data.shape[:2] != (height, width):
         log.warning("Ignoring saved plate: image missing or wrong size")
         return None
-    return Plate(data.astype(np.float32), meta)
+    noise = None
+    if meta.has_noise:
+        raw = cv2.imread(str(directory / PLATE_NOISE), cv2.IMREAD_COLOR)
+        if raw is not None and raw.shape == data.shape:
+            noise = raw.astype(np.float32) / NOISE_QUANT
+        else:
+            log.warning("Saved plate's noise profile is missing or the wrong size: no synthetic grain until a new "
+                        "plate is captured (press B).")
+    return Plate(data.astype(np.float32), meta, noise)
 
 
 class PlateCapture:
@@ -262,6 +301,10 @@ class PlateCapture:
 
     def result(self) -> np.ndarray:
         return self._acc.result()
+
+    def noise(self) -> np.ndarray | None:
+        """Per-pixel temporal std of the captured frames (the camera's grain), for the plate's noise profile."""
+        return self._acc.noise()
 
     def abort_image(self) -> np.ndarray | None:
         """The frame the capture aborted on, with what was detected drawn in: red = counted as a person

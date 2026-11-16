@@ -12,7 +12,7 @@ from pathlib import Path
 import cv2
 import psutil
 
-from incanto.config import ConfigError, load_config
+from incanto.config import VANISH_STYLES, ConfigError, load_config
 from incanto.io.camera import (EXPOSURE_MAX, EXPOSURE_MIN, Camera, CameraError, ThreadedCamera,
                                install_exit_guard)
 from incanto.io.exposure_lock import ExposureLock
@@ -23,8 +23,8 @@ from incanto.plate.clean_plate import (PlateCapture, load_plate, make_plate, sav
 from incanto.plate.health import HealthLimits, HealthMonitor, StalenessNudge
 from incanto.perception.segmenter import Segmenter
 from incanto.render import overlay
-from incanto.render.compositor import Compositor
 from incanto.render.vanish_mask import VanishMask
+from incanto.render.vanish_style import VanishStyler
 from incanto.utils import winperf
 from incanto.utils.evidence import EvidenceSession, grab_vcam_frames
 from incanto.utils.fps import FpsCounter, StageTimer
@@ -32,7 +32,7 @@ from incanto.utils.imaging import downscale
 from incanto.utils.logging import setup_logging
 
 log = logging.getLogger("incanto")
-PREVIEW_WINDOW = "Incanto preview (Q quit, D debug view, B capture plate, Shift+B force it, V vanish)"
+PREVIEW_WINDOW = "Incanto preview (Q quit, D debug view, B capture plate, Shift+B force it, V vanish, G vanish style)"
 DEBUG_VIEWS = ("off", "sources", "leak")
 FPS_LOG_INTERVAL_S = 5.0
 PLATE_MISMATCH = "Plate doesn't match the room - press B"
@@ -114,7 +114,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         segment_every: int | None = None, evidence_dir: str | None = None,
         capture_mode: str | None = None, shots_dir: str | None = None,
         mask_mode: str | None = None, vanish_on_start: bool = False,
-        debug_view: str = "sources") -> int:
+        debug_view: str = "sources", vanish_style: str | None = None) -> int:
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
@@ -126,6 +126,9 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
 
     if mask_mode is not None:
         cfg = dataclasses.replace(cfg, vanish=dataclasses.replace(cfg.vanish, mask_mode=mask_mode))
+
+    if vanish_style is not None:
+        cfg = dataclasses.replace(cfg, vanish=dataclasses.replace(cfg.vanish, style=vanish_style))
 
     if capture_mode is not None:
         cfg = dataclasses.replace(cfg, video=dataclasses.replace(cfg.video, capture_mode=capture_mode))
@@ -172,7 +175,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                               temporal_mode=p.mask_temporal, release_decay=p.mask_release_decay)
         sw = min(cfg.video.perception_width, cam.width)  # perception frame size, as downscale() makes it
         vmask = VanishMask(cfg.vanish, out_size, (sw, max(1, round(cam.height * sw / cam.width))))
-        compositor = Compositor()
+        styler = VanishStyler(cfg.vanish, vmask, out_size)  # what is shown while vanished (freeze | region | live)
         plate_dir = cfg.plate.resolve_dir()
         plate = load_plate(plate_dir, cam.width, cam.height)
         if plate:
@@ -185,6 +188,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                      m.mean_brightness, m.timestamp)
         else:
             log.info("No usable plate in %s: press B (with the preview focused) to capture one.", plate_dir)
+        log.info("Vanish style: %s (G cycles %s); transition %.2fs; grain x%.2f", styler.style,
+                 " > ".join(VANISH_STYLES), cfg.vanish.transition_s, cfg.vanish.grain_scale)
         capture = PlateCapture(cfg.plate.frames, cfg.plate.countdown_s, cfg.plate.settle_s,
                                cfg.plate.max_person_coverage, cfg.plate.static_blob_max_motion)
         cues = SoundCues(cfg.plate.sounds)
@@ -215,6 +220,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         vresult = None           # latest VanishResult, for the debug view
         if plate:
             vmask.set_plate(plate.u8)
+            styler.set_plate(plate)
         status_msg, status_until = "", 0.0
         log.info("Perception ready: perception_width=%d, hands=%d (%s), segment every %d frame(s), preview every %d frame(s)",
                  cfg.video.perception_width, p.num_hands, "async thread" if p.hands_async else "inline",
@@ -269,7 +275,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
             if capture.active:
                 capture.update(frame, mask, now)  # raw frame, never the composited one
                 if capture.state == capture.DONE:
-                    plate = make_plate(capture.result(), cfg.plate.frames, exposure, capture.peak_coverage)
+                    plate = make_plate(capture.result(), cfg.plate.frames, exposure, capture.peak_coverage,
+                                       capture.noise())
                     try:
                         saved = save_plate(plate, plate_dir)
                         log.info("Plate captured and saved (local-only): %s | %d frames | mean brightness %.1f | "
@@ -285,6 +292,9 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     if shots:
                         cv2.imwrite(str(shots / "plate.png"), plate.u8)
                     vmask.set_plate(plate.u8)
+                    styler.set_plate(plate)
+                    log.info("Plate noise profile: %s", "mean temporal std %.2f levels (BGR %.2f/%.2f/%.2f)" % (
+                        plate.noise.mean(), *plate.noise.mean(axis=(0, 1))) if plate.noise is not None else "none")
                     capture.state = capture.IDLE
                     status_msg, status_until = "Plate captured. Press V to vanish.", now + 4.0
                     cues.play("ok")
@@ -333,10 +343,14 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                             log.info("Plate health: %s", checked.describe())
                     else:
                         if changed:
-                            log.warning("Plate health%s: %s (vanish switches off if this lasts %.0fs)",
+                            log.warning("Plate health%s: %s (%s)",
                                         " (plate from a previous session)" if previous_session else "",
-                                        checked.describe(), pc.health_fail_s)
-                        if vanish_on and monitor.tripped(now):
+                                        checked.describe(),
+                                        "freeze style: vanish stays on, the plate is re-matched before you reappear"
+                                        if styler.style == "freeze" and vanish_on else
+                                        "vanish switches off if this lasts %.0fs" % pc.health_fail_s)
+                        # freeze shows a fixed picture: lighting drift is no reason to drop it mid-session
+                        if vanish_on and styler.style != "freeze" and monitor.tripped(now):
                             vanish_on = False
                             log.warning("Vanish switched OFF: the plate has not matched the room for %.0fs (%s). "
                                         "Press B to capture a new plate.", pc.health_fail_s, checked.describe())
@@ -368,14 +382,10 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                         status_msg, status_until = PLATE_MISMATCH, now + 6.0
                         cues.play("error")
             vresult = None
-            if vanish_on and plate and not capture.active:
-                vresult = vmask.compute(small, segmenter.small, hand_list, timer)
-                if monitor.ok:  # background refresh, outside the near-me zone only
-                    with timer.stage("vm_refresh"):
-                        vmask.refresh_plate(frame)
-                with timer.stage("composite"):
-                    out = (compositor.render(frame, vresult.mask, vresult.plate, dt, vanish=True, roi=vresult.roi)
-                           if vresult.roi else frame)
+            if plate and segmenter.small is not None:
+                # the styler follows vanish_on itself (crossfades on V, freezes or masks), see render/vanish_style.py
+                out, vresult = styler.render(frame, small, segmenter.small, hand_list,
+                                             vanish_on and not capture.active, dt, timer, refresh=monitor.ok)
             else:
                 out = frame
             with timer.stage("vcam"):
@@ -395,6 +405,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 elif DEBUG_VIEWS[hud_mode] == "leak":
                     if vresult is not None and vresult.roi:
                         overlay.draw_leak(preview, out, vresult.plate, vresult.roi)
+                    elif styler.style == "freeze" and styler.active:
+                        overlay.draw_status(preview, "Leak view: freeze has no mask, so nothing can leak (G: region/live)", row=1)
                     else:
                         overlay.draw_status(preview, "Leak view needs vanish ON (press V)", row=1)
                 overlay.draw_fps(preview, fps_counter.fps)
@@ -406,7 +418,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     plate_line = "plate: from a previous session (not checked yet)"
                 else:
                     plate_line = "plate: ready"
-                state_line = ("VANISH ON" if vanish_on else "vanish off") + " | " + plate_line
+                state_line = (("VANISH ON" if vanish_on else "vanish off") + f" [{styler.style}]" + " | " + plate_line)
                 if vanish_on and nudge.showing:
                     overlay.draw_status(preview, LIGHTING_CHANGED, row=1)
                 overlay.draw_status(preview, state_line)
@@ -454,7 +466,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 if key in (ord("s"), ord("S")):
                     if shots:
                         shot_no += 1
-                        stem = f"vanished-{cfg.vanish.mask_mode}-{shot_no}" if vanish_on else f"live-with-me-{shot_no}"
+                        stem = f"vanished-{styler.style}-{cfg.vanish.mask_mode}-{shot_no}" if vanish_on else f"live-with-me-{shot_no}"
                         cv2.imwrite(str(shots / f"{stem}.png"), out)  # the exact frame sent to the vcam: no HUD
                         cv2.imwrite(str(shots / f"{stem}-preview.png"), preview)  # with the debug view as shown
                         log.info("Saved screenshots (local-only): %s.png (vcam output) and %s-preview.png",
@@ -473,6 +485,10 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                         log.info("Vanish OFF")
                     else:
                         want_vanish = True  # granted on the next frame if the plate passes the health check
+                if key in (ord("g"), ord("G")):
+                    old = styler.style
+                    log.info("Vanish style: %s -> %s%s", old, styler.cycle_style(),
+                             " (vanish is on: switched at once, no crossfade between styles)" if vanish_on else "")
                 if key in (ord("d"), ord("D")):
                     hud_mode = (hud_mode + 1) % len(DEBUG_VIEWS)
                     log.info("Debug view: %s", DEBUG_VIEWS[hud_mode])
@@ -498,8 +514,9 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     cam.timer.reset()
                 else:
                     rx_fps = (rx_count - 1) / (rx_last - rx_first) if rx_count > 1 and rx_last > rx_first else 0.0
-                log.info("FPS %.1f (avg over %.1fs) | camera delivers %.1f fps | %s | cpu=%.0f%% (of one core)",
+                log.info("FPS %.1f (avg over %.1fs) | camera delivers %.1f fps | %s%s | cpu=%.0f%% (of one core)",
                          frames_since_log / (now - last_log), now - last_log, rx_fps, stages,
+                         f" | vanish={styler.style}" if vanish_on else "",
                          proc.cpu_percent(None))
                 rx_first, rx_count = None, 0
                 if p.hands_async:
@@ -508,7 +525,12 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 log.info("camera: exposure=%s (our setting; driver readback is unreliable) | power=%s",
                          (lock.describe() if lock else "auto") if exposure is None else f"{exposure:.0f} manual",
                          winperf.power_source())
-                if vanish_on:
+                if vanish_on and styler.style == "freeze":
+                    log.info("vanish [freeze]: whole frame = gain-matched plate held fixed, grain %s | plate health: %s",
+                             ("x%.2f of the measured noise" % cfg.vanish.grain_scale) if styler.grain_available
+                             else "off (%s)" % ("grain_scale 0" if cfg.vanish.grain_scale <= 0 else "plate has no noise profile"),
+                             monitor.health.describe() if monitor.health else "not judged yet")
+                elif vanish_on:
                     st = vmask.stats
                     if st.n:
                         n, rn = st.n, max(st.resid_n, 1)
@@ -592,6 +614,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--vanish-on-start", action="store_true",
                         help="start with vanish ON when a saved plate exists and passes the health check "
                              "(for headless timing runs)")
+    parser.add_argument("--vanish-style", choices=VANISH_STYLES,
+                        help="override vanish.style from config.yaml (G cycles the styles in the preview)")
     parser.add_argument("--debug-view", choices=DEBUG_VIEWS, default="sources",
                         help="initial preview debug view (D cycles off -> sources -> leak)")
     parser.add_argument("--shots-dir", metavar="DIR",
@@ -607,7 +631,7 @@ def main(argv: list[str] | None = None) -> int:
     return run(args.config, args.seconds, not args.no_preview, args.lock_exposure,
                not args.no_perf_tweaks, args.segment_every, args.evidence, args.capture_mode,
                args.shots_dir, args.mask_mode,
-               args.vanish_on_start, args.debug_view)
+               args.vanish_on_start, args.debug_view, args.vanish_style)
 
 
 if __name__ == "__main__":

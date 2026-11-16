@@ -65,6 +65,17 @@ vanish:                        # the mask used when V replaces you with the plat
                                # frame into the plate around the mask, so it tracks daylight (0 = off). Only
                                # pixels every mask source calls background AND that still match the matched plate
   plate_refresh_margin_px: 15  # the refresh stays this far outside the mask (all sources, plus the feather)
+  style: freeze                # freeze | region | live. What is shown while vanished (G cycles them in the preview):
+                               #   freeze = the whole frame is the plate (gain-matched once when V turns on, held
+                               #            fixed, plus synthetic grain): no mask, so no outline however you move
+                               #   region = a big soft region (all mask sources ever seen this session, grown by
+                               #            region_margin_px, feathered by region_feather_px) shows the plate;
+                               #            the rest stays live. The region only grows while vanished
+                               #   live   = the per-frame mask composite (the Phase 3 behaviour)
+  region_margin_px: 120        # region style: grow the accumulated mask sources by this (px at 1280 wide)
+  region_feather_px: 60        # region style: soft edge outside that
+  transition_s: 0.4            # V on/off crossfade (freeze and region; live cuts), time-based; 0 = hard cut
+  grain_scale: 1.0             # synthetic grain on plate pixels, x the noise measured at plate capture; 0 = off
 
 plate:                         # clean plate of the empty room (plates/ is local-only, gitignored)
   frames: 30                   # frames averaged into the plate

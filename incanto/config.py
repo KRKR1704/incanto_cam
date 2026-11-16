@@ -64,6 +64,7 @@ class CameraConfig:
 
 
 VANISH_MASK_MODES = ("seg_only", "seg_hands", "full")
+VANISH_STYLES = ("freeze", "region", "live")
 PLATE_MATCH_MODES = ("off", "gain", "gain_offset", "gain_map")
 PLATE_DIFF_METRICS = ("gray", "max_channel", "lab")
 
@@ -96,6 +97,12 @@ class VanishConfig:
     match_margin_px: int = 30            # background used for matching is this far outside the mask
     plate_refresh_alpha: float = 0.02    # per frame: blend live pixels into the plate around the mask (0 = off)
     plate_refresh_margin_px: int = 15    # the refresh stays this far outside the mask (every source, plus feather)
+    # Vanish styles (render/vanish_style.py): what is shown while vanished. The mask code above is kept for all of them.
+    style: str = "freeze"                # freeze (whole frame = plate, no mask) | region | live (the masked composite)
+    region_margin_px: int = 120          # region: every mask source ever seen this session, grown by this much (at 1280 wide)
+    region_feather_px: int = 60          # region: soft edge outside that, so there is no visible outline
+    transition_s: float = 0.4            # V on/off crossfades over this long (time-based, uses dt); 0 = hard cut
+    grain_scale: float = 1.0             # synthetic camera grain on frozen plate pixels, x the captured noise; 0 = off
 
 
 @dataclass(frozen=True)
@@ -263,6 +270,14 @@ def load_config(path: str | Path | None = None) -> Config:
 
     if vanish.mask_mode not in VANISH_MASK_MODES:
         raise ConfigError(f"vanish.mask_mode must be one of {VANISH_MASK_MODES}, got '{vanish.mask_mode}'")
+    if vanish.style not in VANISH_STYLES:
+        raise ConfigError(f"vanish.style must be one of {VANISH_STYLES}, got '{vanish.style}'")
+    if vanish.region_margin_px < 0 or vanish.region_feather_px < 0:
+        raise ConfigError("vanish.region_margin_px and vanish.region_feather_px must be >= 0")
+    if vanish.transition_s < 0:
+        raise ConfigError("vanish.transition_s must be >= 0 (0 = hard cut)")
+    if not 0 <= vanish.grain_scale <= 4:
+        raise ConfigError("vanish.grain_scale must be between 0 (off) and 4")
     if vanish.plate_match not in PLATE_MATCH_MODES:
         raise ConfigError(f"vanish.plate_match must be one of {PLATE_MATCH_MODES}, got '{vanish.plate_match}'")
     if vanish.plate_diff_metric not in PLATE_DIFF_METRICS:

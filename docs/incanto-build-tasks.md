@@ -92,6 +92,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 3.6 | Debug hotkey `V`: toggle instant vanish using the compositor | 3.5 | 5m | [x] |
 | 3.7 | Camera safety net: restore auto exposure on any exit (try/finally, atexit, signals, console close) when it was set manual; `--reset-camera` command | 1.2 | 20m | [x] |
 | 3.8 | Vanish mask quality: segment every frame with fast-attack/slow-release smoothing; dilated segmenter mask; filled hand hulls; plate-difference mask; near-me limit on the plate difference; per-channel plate brightness matching with a spatial gain grid; solid-core alpha with the feather only outside it; colour-aware plate difference with fast-attack/slow-release and a per-cell lighting guard; colour-coded source view and a leak view (D cycles off / sources / leak); `vanish.mask_mode` seg_only / seg_hands / full | 3.6 | 2.5h | [x] |
+| 3.9 | Vanish styles: `vanish.style` freeze (whole frame = plate, gain-matched once and held, plus synthetic grain from a per-pixel noise profile captured with the plate) / region (max-held union of the mask sources, large margin, wide feather, rest live) / live (unchanged); V crossfade by dt (`vanish.transition_s`); fresh gain match before reappearing; G cycles styles; style shown in the preview | 3.8 | 2h | [x] |
 
 **Phase gate:** Pressing `V` makes you disappear with no visible hole or ghosting, live in Meet. Save before/after screenshots (local-only).
 
