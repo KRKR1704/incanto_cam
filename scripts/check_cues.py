@@ -86,7 +86,7 @@ def main() -> int:
     flagged, counts = [], {"OK": 0, "LATE": 0, "CHECK": 0}
     try:
         for n, g in enumerate(entry["gestures"], 1):
-            cue, tol = g["t"], g["tolerance_s"]
+            cue, tol = g.get("cue_time", g.get("t")), g.get("tolerance_s", 0.6)
             t_abs = clip.first_time + cue
             frames = scan(clip, tracker, t_abs - PRE_S, t_abs + POST_S, last)
             with_hand = [t - t_abs for t, k, _ in frames if k >= 1]

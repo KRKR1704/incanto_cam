@@ -31,7 +31,7 @@ from incanto.render.vanish_mask import VanishMask
 from incanto.render.vanish_style import VanishStyler
 from incanto.utils import winperf
 from incanto.utils.evidence import EvidenceSession, grab_vcam_frames
-from incanto.utils.fps import FpsCounter, StageTimer
+from incanto.utils.fps import FpsCounter, StageTimer, UniqueFps
 from incanto.utils.imaging import downscale
 from incanto.utils.logging import setup_logging
 
@@ -41,6 +41,8 @@ DEBUG_VIEWS = ("off", "sources", "leak")
 FPS_LOG_INTERVAL_S = 5.0
 PLATE_MISMATCH = "Plate doesn't match the room - press B"
 LIGHTING_CHANGED = "Lighting changed - press B to refresh plate"
+CAMERA_SLOW = "Camera is dropping to ~15 fps - add light"
+UNIQUE_FPS_WARN_BELOW, UNIQUE_FPS_WARN_S = 20.0, 10.0   # warn when unique fps stays under 20 for 10 s
 
 
 def _shift_held() -> bool:
@@ -291,6 +293,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         evidence = EvidenceSession(evidence_dir) if evidence_dir and show_preview else None
 
         fps_counter, timer = FpsCounter(), StageTimer()
+        unique_fps = UniqueFps(UNIQUE_FPS_WARN_BELOW, UNIQUE_FPS_WARN_S)   # frames that differ from the previous one
         rx_first = rx_last = None  # read-completion times, for the camera delivery rate
         rx_count = 0
         proc = psutil.Process()
@@ -313,6 +316,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 break
             now = cam.frame_time if replaying else time.perf_counter()   # replay runs on the recorded clock
             frame_t = cam.frame_time if threaded or replaying else now    # when this frame was captured
+            frame_now = now                                               # the frame clock (recorded time in replay)
             dt = now - last_frame  # seconds since the previous frame; effects must use this
             last_frame = now
             rx_last = time.perf_counter()
@@ -322,6 +326,14 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
 
             with timer.stage("downscale"):
                 small = downscale(frame, cfg.video.perception_width)
+            was_slow = unique_fps.warning
+            unique_fps.update(small, now)
+            if unique_fps.warning != was_slow:
+                if unique_fps.warning:
+                    log.warning("%s (only %.1f of the frames per second are new: the driver is repeating frames)",
+                                CAMERA_SLOW, unique_fps.window_fps())
+                else:
+                    log.info("Camera is back to %.1f unique fps.", unique_fps.window_fps())
             if async_hands:
                 # Never waits: hand the newest frame to the worker, use whatever result is newest.
                 hands.submit(small, getattr(cam, "frame_time", now))
@@ -496,6 +508,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     else:
                         overlay.draw_status(preview, "Leak view needs vanish ON (press V)", row=1)
                 overlay.draw_fps(preview, fps_counter.fps)
+                if unique_fps.warning:
+                    overlay.draw_warning(preview, CAMERA_SLOW, row=2)
                 if recorder is not None and recorder.active:
                     overlay.draw_rec(preview, recorder.elapsed, recorder.dropped)
                 if mic_ring is not None:
@@ -653,8 +667,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     cam.timer.reset()
                 else:
                     rx_fps = (rx_count - 1) / (rx_last - rx_first) if rx_count > 1 and rx_last > rx_first else 0.0
-                log.info("FPS %.1f (avg over %.1fs) | camera delivers %.1f fps | %s%s | cpu=%.0f%% (of one core)",
-                         frames_since_log / (now - last_log), now - last_log, rx_fps, stages,
+                log.info("FPS %.1f (unique %.1f) (avg over %.1fs) | camera delivers %.1f fps | %s%s | cpu=%.0f%% (of one core)",
+                         frames_since_log / (now - last_log), unique_fps.interval_fps(frame_now), now - last_log, rx_fps, stages,
                          f" | vanish={styler.style}" if vanish_on else "",
                          proc.cpu_percent(None))
                 rx_first, rx_count = None, 0

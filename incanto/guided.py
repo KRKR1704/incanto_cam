@@ -194,7 +194,9 @@ class GuidedSession:
 
     def label_entries(self, clip_start_time: float) -> tuple[list[dict], list[dict]]:
         """(gesture labels, talk segments) with times in seconds from the clip's first video frame."""
-        gestures = [{"gesture": g, "t": round(ta - clip_start_time, 3), "tolerance_s": self.plan.tolerance_s}
+        # event_time starts as the cue time; scripts/retime_labels.py replaces it with when the gesture really happened
+        gestures = [{"gesture": g, "cue_time": round(ta - clip_start_time, 3), "event_time": round(ta - clip_start_time, 3),
+                     "tolerance_s": self.plan.tolerance_s, "method": "cue beep (not retimed)"}
                     for g, ta in self.fired]
         talks = [{"start": round(self.t0 + tk.start - clip_start_time, 3), "end": round(self.t0 + tk.end - clip_start_time, 3)}
                  for tk in self.plan.talks]
@@ -206,8 +208,12 @@ LABELS_HEADER = (
     "# Gesture labels for the recorded clips (Phase 4). This is the ONLY file under tests/fixtures/ that is committed;\n"
     "# the clips themselves are local-only (recordings/ or tests/fixtures/, both gitignored). Written by\n"
     "# `python -m incanto --record-guided <plan>`.\n"
-    "# t = seconds from the clip's first video frame to the cue beep; a detection counts if it lands within\n"
-    "# t +- tolerance_s. no_gesture_segments are talk-with-your-hands stretches in which nothing may fire.\n")
+    "# Times are seconds from the clip's first video frame. cue_time = when the guide beeped; event_time = when the gesture\n"
+    "# really happened (people react 0.5-1.3 s late): Phase 5 evaluation uses event_time, and a detection counts if it lands\n"
+    "# within event_time +- tolerance_s. After a recording, run scripts/retime_labels.py to set event_time from the recording\n"
+    "# (until then event_time = cue_time and method says so). alt_event_times = further genuine onsets in the same window.\n"
+    "# dropped / unresolved list cues left out of gestures, with the reason. no_gesture_segments are talk-with-your-hands\n"
+    "# stretches in which nothing may fire.\n")
 
 
 def load_labels(path: Path = LABELS_PATH) -> dict:

@@ -91,7 +91,10 @@ def test_labels_are_relative_to_the_first_video_frame_with_the_tolerance():
     plan = parse_plan(PLAN)
     s, _, _ = run(plan)
     gestures, talks = s.label_entries(clip_start_time=999.5)             # the clip began 0.5 s before the plan
-    assert gestures[0] == {"gesture": "snap", "t": pytest.approx(plan.cues[0].t + 0.5, abs=0.06), "tolerance_s": 0.6}
+    assert gestures[0]["gesture"] == "snap" and gestures[0]["tolerance_s"] == 0.6
+    assert gestures[0]["cue_time"] == pytest.approx(plan.cues[0].t + 0.5, abs=0.06)
+    assert gestures[0]["event_time"] == gestures[0]["cue_time"]               # until it is retimed from the recording
+    assert "not retimed" in gestures[0]["method"]
     assert len(gestures) == 5
     assert talks == [{"start": pytest.approx(plan.talks[0].start + 0.5, abs=1e-3),
                       "end": pytest.approx(plan.talks[0].end + 0.5, abs=1e-3)}]
@@ -100,11 +103,12 @@ def test_labels_are_relative_to_the_first_video_frame_with_the_tolerance():
 def test_labels_writer_creates_merges_replaces_and_keeps_the_header(tmp_path):
     path = tmp_path / "fixtures" / "labels.yaml"
     assert load_labels(path) == {"clips": {}}
-    g1 = [{"gesture": "snap", "t": 8.1, "tolerance_s": 0.6}]
+    g1 = [{"gesture": "snap", "cue_time": 8.1, "event_time": 8.6, "tolerance_s": 0.3}]
     write_labels(path, "guided-a", g1, [{"start": 100.0, "end": 220.0}], {"plan": "p"})
-    write_labels(path, "guided-b", [{"gesture": "clap", "t": 9.0, "tolerance_s": 0.6}], [])
+    write_labels(path, "guided-b", [{"gesture": "clap", "cue_time": 9.0, "event_time": 9.7, "tolerance_s": 0.3}], [])
     text = path.read_text()
     assert text.startswith("# Gesture labels") and "ONLY file under tests/fixtures/" in text
+    assert "event_time" in text and "retime_labels.py" in text
     data = yaml.safe_load(text)
     assert set(data["clips"]) == {"guided-a", "guided-b"}
     assert data["clips"]["guided-a"]["gestures"] == g1 and data["clips"]["guided-a"]["plan"] == "p"

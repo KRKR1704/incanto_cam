@@ -139,6 +139,8 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 5.10 | Tune thresholds in `config.yaml` until the replay targets pass | 5.9 | 30m | [ ] |
 | 5.11 | Unit tests for trigger cooldown + debounce logic | 5.7 | 15m | [ ] |
 
+**Note (from the Phase 4 measurements): detection timing should come from audio where possible.** Video gives presence and pose (hands visible, a raised hand, a thumbs-up shape) and may update at only ~15 fps: auto exposure lengthens in a dim room and the driver then repeats every other frame (the guided clip: exactly 15.0 unique fps in every segment, while 30 frames a second arrive). A video timestamp is therefore good to ~66 ms per event, and hand tracking loses both hands for 150-350 ms around a clap. So: snap and clap timing = the audio onset (the A/V check puts audio ~25 ms earlier than the picture, within +-1 frame); the video side only confirms (raised hand near the face, wrists close). Evaluate against `event_time` in `labels.yaml` (when the gesture happened), not `cue_time` (when the guide beeped; people react 0.5-1.3 s late), with the `tolerance_s` given there. A manual exposure of -6 or shorter restores 30 real fps (the live FPS line shows `unique N`, and the preview warns when it stays under 20 for 10 s).
+
 **Phase gate:**
 - Replay report: ≥ 9/10 detected per gesture, **0** false triggers on the talking clip. Save the report output (`.txt`, committed).
 - Live: 10 real snaps, ≥ 9 trigger, with the gesture name shown on the preview HUD. Save the recording (local-only).

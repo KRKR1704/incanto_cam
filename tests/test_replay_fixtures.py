@@ -28,7 +28,12 @@ def test_labels_file_is_well_formed_if_present():
         pytest.skip("tests/fixtures/labels.yaml not recorded yet (python -m incanto --record-guided plans/fixture-plan.yaml)")
     for name, entry in labelled_clips():
         for g in entry["gestures"]:
-            assert g["gesture"] in ("snap", "clap", "thumbs_up") and g["t"] >= 0 and g["tolerance_s"] > 0
+            ev = g.get("event_time", g.get("t"))                 # "t" is the pre-retiming format
+            assert g["gesture"] in ("snap", "clap", "thumbs_up") and ev >= 0 and g["tolerance_s"] > 0
+            if "cue_time" in g:
+                assert g["event_time"] >= 0 and "method" in g
+        for d in entry.get("dropped", []) + entry.get("unresolved", []):
+            assert d["gesture"] in ("snap", "clap", "thumbs_up") and d["reason"]
         for seg in entry["no_gesture_segments"]:
             assert seg["end"] > seg["start"] >= 0
 
@@ -44,7 +49,7 @@ def test_fixture_clips_replay_in_order_with_labels_inside_the_clip():
             continue                                         # clip is local-only and not on this machine
         clip = Clip.load(path)
         assert (np.diff(clip.frame_times) > 0).all()
-        assert all(0 <= g["t"] <= clip.duration for g in entry["gestures"])
+        assert all(0 <= g.get("event_time", g.get("t")) <= clip.duration for g in entry["gestures"])
         src = ReplaySource(clip, realtime=False)
         first = src.read()
         assert first.shape == (clip.height, clip.width, 3)

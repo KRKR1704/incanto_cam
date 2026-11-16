@@ -98,11 +98,11 @@ def main() -> int:
     if cues:
         spikes, picked = [], []
         for g in cues:
-            c = clip.first_time + g["t"]
+            c = clip.first_time + g.get("cue_time", g.get("t"))
             cand = [s for s in spikes_all if c - g["tolerance_s"] <= s <= c + 2.0]
             if cand:
                 spikes.append(cand[0])
-                picked.append(g["t"])
+                picked.append(g.get("cue_time", g.get("t")))
         lines.append(f"labelled clap cues: {len(cues)}; a sound spike was found for {len(spikes)} of them "
                      f"(searched from cue - tolerance to cue + 2 s)")
     else:

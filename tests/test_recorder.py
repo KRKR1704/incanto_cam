@@ -226,3 +226,52 @@ def test_missing_or_broken_clip_raises_a_clear_error(tmp_path):
     (tmp_path / "empty").mkdir()
     with pytest.raises(ClipError, match="meta.json"):
         Clip.load(tmp_path / "empty")
+
+
+# -- unique fps ----------------------------------------------------------------------------------
+from incanto.utils.fps import UniqueFps  # noqa: E402
+
+
+def textured(k):
+    rng = np.random.default_rng(k)
+    return rng.integers(0, 255, (54, 96, 3), dtype=np.uint8)
+
+
+def run_unique(repeat_every, seconds, fps=30.0, start=0.0, mon=None):
+    mon = mon or UniqueFps()
+    t, k, unique = start, 0, 0
+    for n in range(int(seconds * fps)):
+        if repeat_every == 0 or n % repeat_every != 1:
+            k += 1                                   # a new picture
+        unique += mon.update(textured(k), t)
+        t += 1 / fps
+    return mon, unique
+
+
+def test_unique_fps_counts_repeated_frames():
+    mon, unique = run_unique(repeat_every=2, seconds=6)       # every second frame is a repeat: 15 unique fps
+    assert unique == pytest.approx(90, abs=1)
+    assert mon.interval_fps(6.0) == pytest.approx(15.0, abs=0.3)
+    mon2, unique2 = run_unique(repeat_every=0, seconds=6)      # a real 30 fps camera
+    assert unique2 == 180 and mon2.interval_fps(6.0) == pytest.approx(30.0, abs=0.5)
+
+
+def test_unique_fps_warns_after_ten_seconds_under_twenty_and_clears_with_hysteresis():
+    mon, _ = run_unique(2, 9.0)
+    assert not mon.warning                                     # not a full 10 s window yet
+    mon, _ = run_unique(2, 4.0, start=9.0, mon=mon)
+    assert mon.warning and mon.window_fps() == pytest.approx(15.0, abs=0.5)
+    mon, _ = run_unique(0, 3.0, start=13.0, mon=mon)           # light is back: 30 unique fps, the window recovers gradually
+    assert mon.warning                                         # 7 s at 15 + 3 s at 30 is still under 22
+    mon, _ = run_unique(0, 10.0, start=16.0, mon=mon)
+    assert not mon.warning
+
+
+def test_unique_fps_does_not_warn_at_a_healthy_rate_and_noise_alone_is_new():
+    mon, _ = run_unique(0, 15.0)
+    assert not mon.warning
+    still = np.full((54, 96, 3), 90, np.uint8)
+    m = UniqueFps()
+    assert m.update(still, 0.0) and not m.update(still.copy(), 0.03)       # an identical frame is a repeat
+    noisy = np.clip(still.astype(int) + np.random.default_rng(1).normal(0, 2, still.shape), 0, 255).astype(np.uint8)
+    assert m.update(noisy, 0.06)                                           # sensor noise alone still counts as new

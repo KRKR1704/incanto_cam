@@ -118,6 +118,11 @@ def draw_status(img: np.ndarray, text: str, row: int = 0) -> None:
     _text(img, text, _at(img, 16, 70 + row * 30), scale=0.7, color=(0, 200, 255))
 
 
+def draw_warning(img: np.ndarray, text: str, row: int = 0) -> None:
+    """Warning line (red) in the status area of the preview."""
+    _text(img, text, _at(img, 16, 70 + row * 30), scale=0.7, color=(60, 60, 255))
+
+
 _SOURCE_COLORS = np.array([(0, 0, 0), (0, 255, 0), (255, 128, 0), (0, 255, 255), (0, 0, 255)], np.uint8)  # BGR
 
 

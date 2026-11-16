@@ -1,0 +1,15 @@
+Unique frames per second: guided-20261116-175501 (8922 frames, 298 s, delivered 29.93 fps)
+unique = differs from the previous frame (mean abs difference of 96x54 grey >= 0.03 levels); same test as the live monitor
+frame-difference histogram (levels): exactly 0: 50.0% | 0-0.03: 0.0% | 0.03-0.1: 0.0% | 0.1-0.3: 0.0% | >=0.3: 50.0%  (nothing between 0 and 0.3 means the threshold is not borderline)
+
+segment                  clip time (s)  frames unique fps mean luma
+lead-in + snap cues        0.1-52.7       1570       15.0     109.8
+rest                      52.7-62.7        300       15.0     111.6
+clap cues                 62.7-109.4      1402       15.0     116.0
+rest                     109.4-119.4       298       15.0     114.4
+thumbs_up cues           119.4-166.0      1397       15.0     114.5
+rest                     166.0-176.0       300       15.1     113.1
+talk with hands          176.0-296.0      3595       15.0     116.8
+whole clip                 0.0-298.0      8922       15.0     114.7
+
+live monitor on this clip (warns when the last 10 s stay under 20 unique fps): the warning would show for 289 of 298 s (97%); changes: ON at 10 s
