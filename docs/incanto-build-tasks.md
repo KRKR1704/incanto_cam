@@ -104,13 +104,13 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 
 | ID | Task | Depends on | Est. | Done |
 |---|---|---|---|---|
-| 4.1 | `io/audio.py`: mic stream thread (sounddevice, ~20 ms blocks) into a thread-safe ring buffer with timestamps | 1.5 | 20m | [ ] |
-| 4.2 | `io/recorder.py`: hotkey `R` starts/stops recording raw frames to `.mp4` + mic to `.wav` in `recordings/` (gitignored, local-only), with a shared start timestamp | 4.1 | 25m | [ ] |
-| 4.3 | Recorder runs on its own thread so recording never drops main-loop FPS | 4.2 | 10m | [ ] |
-| 4.4 | Replay source: `python -m incanto --replay <clip>` feeds video + audio through the pipeline in sync instead of webcam/mic | 4.2 | 25m | [ ] |
-| 4.5 | `--render-out <file>` option: save the composited output of a replay to `.mp4` for review | 4.4 | 10m | [ ] |
-| 4.6 | Record the labeled fixture set: 10 snaps, 10 claps, 10 thumbs-ups, 2 min of talking with hand movement. Clips of the user stay **local-only** (`recordings/` or `tests/fixtures/`, both gitignored); they are never committed | 4.2 | 15m | [ ] |
-| 4.7 | Label file `tests/fixtures/labels.yaml`: clip → list of (gesture, timestamp). This is the **only** file under `tests/fixtures/` that is committed | 4.6 | 15m | [ ] |
+| 4.1 | `io/audio.py`: mic stream thread (sounddevice, ~20 ms blocks) into a thread-safe ring buffer with timestamps (on the camera's perf_counter clock). Never defaults to a virtual device; `--list-audio-devices`; runs without audio if there is no mic | 1.5 | 20m | [x] |
+| 4.2 | `io/recorder.py`: hotkey `R` starts/stops recording raw frames to `.avi` (HFYU lossless by default, MJPG optional: this OpenCV build has no usable H.264 and cannot raise MJPG quality) + mic to `.wav` in `recordings/` (gitignored, local-only), with a per-frame timestamp sidecar and the audio start time on the same clock | 4.1 | 25m | [x] |
+| 4.3 | Recorder runs on its own thread so recording never drops main-loop FPS (bounded queue; drops are counted, not waited for) | 4.2 | 10m | [x] |
+| 4.4 | Replay source: `python -m incanto --replay <clip>` feeds video + audio through the pipeline in sync (recorded times; `--realtime` or `--fast`; hands synchronous and deterministic) instead of webcam/mic | 4.2 | 25m | [x] |
+| 4.5 | `--render-out <file>` option: save the composited output of a replay to `.mp4`/`.avi` for review (local-only) | 4.4 | 10m | [x] |
+| 4.6 | Record the labeled fixture set: 10 snaps, 10 claps, 10 thumbs-ups, 2 min of talking with hand movement. Clips of the user stay **local-only** (`recordings/` or `tests/fixtures/`, both gitignored); they are never committed. Tooling done: `--record-guided plans/fixture-plan.yaml` (beeps and prompts, cue times recorded); the clip itself still has to be recorded | 4.2 | 15m | [ ] |
+| 4.7 | Label file `tests/fixtures/labels.yaml`: clip → list of (gesture, timestamp). This is the **only** file under `tests/fixtures/` that is committed. Written automatically by `--record-guided` (gesture, cue time, tolerance +-0.6 s, talk segments); waits for the recording | 4.6 | 15m | [ ] |
 
 **Phase gate:** Replaying a recorded clip produces the same perception output (mask + hands) as live, and the audio stays in sync. Clips are local-only; commit only the comparison log/report.
 

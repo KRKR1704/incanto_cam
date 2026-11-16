@@ -20,11 +20,11 @@ Cast effects on your video calls with a gesture: a local, gesture-triggered vide
 
 See `docs/incanto-project-plan.md` and `docs/incanto-build-tasks.md` for the plan.
 
-**Status: Phase 3 complete** (camera pipeline, perception, clean plate and vanish test; spells and gestures come in later phases).
+**Status: Phase 4 in progress** (record and replay tooling is built; the labelled fixture clip still has to be recorded). Phases 0-3 are complete (camera pipeline, perception, clean plate and vanish test).
 
 ## Vanish test (Phase 3)
 
-Hotkeys work in the preview window: **B** captures a clean plate of the empty room (5 s countdown with a beep per second, leave the frame; a long tone means frames are being taken, three rising notes mean it was saved, two falling low notes mean it was aborted and nothing changed), **V** toggles vanish (applied to the virtual camera output too), **D** cycles the debug view (off, source colours, leak view where red shows you leaking through), **G** cycles the vanish style (freeze, region, live; each change is logged), **S** screenshot (with `--shots-dir`), **Q** quit.
+Hotkeys work in the preview window: **B** captures a clean plate of the empty room (5 s countdown with a beep per second, leave the frame; a long tone means frames are being taken, three rising notes mean it was saved, two falling low notes mean it was aborted and nothing changed), **V** toggles vanish (applied to the virtual camera output too), **D** cycles the debug view (off, source colours, leak view where red shows you leaking through), **R** starts/stops a recording (see Record and replay below), **G** cycles the vanish style (freeze, region, live; each change is logged), **S** screenshot (with `--shots-dir`), **Q** quit.
 
 `vanish.mask_mode` in `config.yaml` (or `--mask-mode`) picks what hides you: `seg_only` (segmenter), `seg_hands` (plus filled hand hulls) or `full` (plus pixels that differ from the brightness-matched plate). The plate is a photo of your room and is local-only (`plates/`, gitignored). Recapture it whenever furniture moves: in `full` mode anything that differs from the plate is replaced by the plate's version.
 
@@ -46,6 +46,22 @@ Hotkeys work in the preview window: **B** captures a clean plate of the empty ro
 V on/off crossfades between the ordinary frame and the vanished output over `vanish.transition_s` (0.4 s, time-based using each frame's dt; 0 = hard cut). `live` keeps its hard cut. Phase 6 replaces this with the dissolve. Switching style with G while vanished takes effect at once, without a crossfade between styles.
 
 `scripts/bench_vanish_styles.py` times each style on synthetic 1280x720 frames (run it with `PYTHONPATH=.`).
+
+## Record and replay (Phase 4)
+
+Everything here is local-only: clips, audio and renders live in `recordings/` (gitignored, and the pre-commit hook refuses video, audio and array files). Only `tests/fixtures/labels.yaml`, `.txt` reports and code are committed.
+
+**Microphone.** `audio:` in `config.yaml`. The mic runs on its own stream (sounddevice, mono, 20 ms blocks) into a ring buffer stamped with `time.perf_counter()`, the same clock as the camera frames. `python -m incanto --list-audio-devices` lists inputs, marks virtual ones (Voicemod, VB-Audio, Steam Streaming, Stereo Mix, ...) and says which one would be used. With `audio.device: auto` a virtual default input is never used: a warning is logged and the first real microphone is picked (the log names it). Set `audio.device` to a name fragment (`HyperX`) or an index to choose yourself. With no usable microphone Incanto runs without audio and says so.
+
+**Record.** **R** in the preview starts and stops a recording (a red REC indicator is drawn on the preview only). A recording is a folder `recordings/<timestamp>/`: `video.avi` (the raw camera frames, before any effect), `audio.wav` (mono 16-bit), `frames.csv` (frame index to capture time) and `meta.json` (sizes, codec, nominal fps, and the audio start time on the same clock). Replay syncs on those recorded times, never on the container's nominal fps. Encoding runs on a recorder thread; if it ever falls behind, frames are dropped and counted rather than slowing the loop (the log says so).
+- `recording.codec: lossless` (default) is HFYU: bit-exact frames, so replay sees exactly the pixels live saw. It costs about 1.7 GB per minute. `mjpg` is about 25 times smaller but is a second JPEG generation (mean error 1.7 levels); this OpenCV build cannot raise MJPG quality, and FFV1 lossless is too slow (65 ms a frame). `--record-codec` overrides it for one run.
+- Frames are the ones the main loop reads; if the loop is late the camera's newest frame wins, so a clip can have a few frames fewer than the camera delivered (about 28.5-29.9 effective fps against 30). Every frame in the clip carries its true time in `frames.csv`.
+
+**Replay.** `python -m incanto --replay recordings/<clip>` feeds the video and audio through the full pipeline instead of the webcam and microphone, on the recorded clock. `--realtime` (default) paces frames by their recorded times; `--fast` runs as fast as the pipeline allows. In replay, hand tracking runs synchronously per frame (not on the async worker) and MediaPipe gets timestamps derived from the recorded times, so results are deterministic run to run. No virtual camera is opened. `--render-out out.mp4` (or `.avi`) saves the composited output of a replay for local review (no audio; local-only, never commit it). `--no-preview` runs it headless.
+
+**Guided recording.** `python -m incanto --record-guided plans/fixture-plan.yaml` prompts you through a plan: for each cue two soft ticks, then a higher beep and a big on-preview prompt ("SNAP NOW"); do the gesture on the beep. The plan has 10 snaps, 10 claps, 10 thumbs-ups with random gaps and rests, then 2 minutes of "talk normally with your hands" with no cues. The cue times are written to `tests/fixtures/labels.yaml` (gesture, time from the clip's first frame, tolerance window of +-0.6 s, plus the talk stretches in which nothing may fire). Commit that file; the clip stays local.
+
+**Checks.** `scripts/check_av_sync.py recordings/<clip>` finds claps in the audio and the frame where your wrists meet, and reports the audio-video offset (target: within one frame, 33 ms); if there is a consistent offset it suggests `audio.offset_ms`, which is added to every audio timestamp, live and replay. `scripts/check_determinism.py recordings/<clip>` replays the clip with two independent sets of hand tracker and segmenter and reports the largest difference in landmarks and masks. Both accept `--report docs/evidence/phase-4/<name>.txt` for a committable text report.
 
 ## Camera dark after a crash? `--reset-camera`
 
