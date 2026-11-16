@@ -187,3 +187,41 @@ def draw_leak(img: np.ndarray, out: np.ndarray, plate_roi: np.ndarray,
         part[:, :, 1] = cv2.subtract(part[:, :, 1], d)
     _text(img, f"LEAK VIEW: red = |output - matched plate| x{gain}; should be none where you were",
           _at(img, 16, -46), scale=0.5, color=(0, 200, 255))
+
+
+def draw_rec(img: np.ndarray, seconds: float, dropped: int = 0) -> None:
+    """Red REC dot with the elapsed time, top right (preview only: the virtual camera never shows it)."""
+    h, w = img.shape[:2]
+    k = _k(img)
+    label = f"REC {int(seconds) // 60}:{int(seconds) % 60:02d}" + (f"  dropped {dropped}" if dropped else "")
+    scale, thickness = _font(img, 0.8, 2)
+    size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)[0]
+    x = w - size[0] - round(24 * k)
+    cv2.circle(img, (x - round(18 * k), round(30 * k)), max(4, round(10 * k)), (0, 0, 255), -1, cv2.LINE_AA)
+    _put(img, label, (x, round(38 * k)), scale, (0, 0, 255), thickness)
+
+
+def draw_cue(img: np.ndarray, text: str, sub: str = "", go: bool = False) -> None:
+    """Big guided-recording prompt in the middle of the preview; `go` = the cue itself ("SNAP NOW")."""
+    h, w = img.shape[:2]
+    k = _k(img)
+    color = (0, 255, 0) if go else (0, 255, 255)
+    scale, thickness = _font(img, 2.6 if go else 1.8, 5 if go else 3)
+    size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)[0]
+    y = h // 2 + size[1] // 2
+    _put(img, text, ((w - size[0]) // 2, y), scale, color, thickness)
+    if sub:
+        s2, t2 = _font(img, 0.8, 2)
+        sz = cv2.getTextSize(sub, cv2.FONT_HERSHEY_SIMPLEX, s2, t2)[0]
+        _put(img, sub, ((w - sz[0]) // 2, y + round(60 * k)), s2, (255, 255, 255), t2)
+
+
+def draw_audio_level(img: np.ndarray, dbfs: float) -> None:
+    """Microphone level bar, bottom left (preview only). -60 dBFS is empty, 0 is full."""
+    h, w = img.shape[:2]
+    k = _k(img)
+    x0, y0, bw, bh = round(16 * k), h - round(24 * k), round(160 * k), max(4, round(8 * k))
+    fill = int(bw * min(1.0, max(0.0, (dbfs + 60.0) / 60.0)))
+    cv2.rectangle(img, (x0, y0), (x0 + bw, y0 + bh), (40, 40, 40), -1)
+    cv2.rectangle(img, (x0, y0), (x0 + fill, y0 + bh), (0, 220, 0) if dbfs < -6 else (0, 0, 255), -1)
+    _text(img, "mic", (x0 + bw + round(8 * k), y0 + bh + round(2 * k)), scale=0.5)

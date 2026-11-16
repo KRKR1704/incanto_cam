@@ -1,0 +1,14 @@
+# Guided recording plan for the Phase 4 fixture clip:  python -m incanto --record-guided plans/fixture-plan.yaml
+# About 5 minutes. For each cue: two soft ticks, then a higher beep and the big prompt; do the gesture ON the beep.
+name: fixture-v1
+seed: 7                  # the random gaps are reproducible
+lead_in_s: 8             # time to get into position before the first cue
+tolerance_s: 0.6         # label window: cue time +- this
+segments:
+  - {gesture: snap, count: 10, gap_s: [4.0, 6.0], hint: "snap with one hand beside your face"}
+  - {rest_s: 10, text: "Rest"}
+  - {gesture: clap, count: 10, gap_s: [4.0, 6.0], hint: "clap both hands together in front of your chest"}
+  - {rest_s: 10, text: "Rest"}
+  - {gesture: thumbs_up, count: 10, gap_s: [4.0, 6.0], hint: "thumbs-up toward the camera, hold about 1 second"}
+  - {rest_s: 10, text: "Rest"}
+  - {talk_s: 120, text: "Talk normally and use your hands"}

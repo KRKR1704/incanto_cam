@@ -37,11 +37,13 @@ class HandTracker:
             min_tracking_confidence=min_tracking_confidence,
         ))
 
-    def detect(self, small_bgr: np.ndarray) -> list[Hand]:
-        """Detect hands in the downscaled BGR perception frame."""
+    def detect(self, small_bgr: np.ndarray, timestamp_ms: int | None = None) -> list[Hand]:
+        """Detect hands in the downscaled BGR perception frame. `timestamp_ms` (strictly increasing) replaces the
+        wall clock; replay passes the recorded time so that runs are deterministic."""
         rgb = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2RGB)
         result = self._landmarker.detect_for_video(
-            mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), self._clock.now())
+            mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb),
+            self._clock.now() if timestamp_ms is None else timestamp_ms)
         hands = []
         for lms, handed in zip(result.hand_landmarks, result.handedness):
             pts = np.array([[p.x, p.y, p.z] for p in lms], dtype=np.float32)

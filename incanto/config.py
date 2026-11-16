@@ -1,6 +1,7 @@
 """Loads and validates config.yaml."""
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,30 @@ class PlateConfig:
         return path if path.is_absolute() else PROJECT_ROOT / path
 
 
+RECORDING_CODECS = ("lossless", "mjpg")
+
+
+@dataclass(frozen=True)
+class AudioConfig:
+    enabled: bool = True
+    device: str | int | None = None  # None / "auto" = the default input unless it is a virtual device; else a name (substring) or index
+    block_ms: int = 20               # mic callback block size
+    ring_seconds: float = 10.0       # how much audio the ring buffer keeps
+    offset_ms: float = 0.0           # added to every audio timestamp (live and replay); scripts/check_av_sync.py suggests it
+
+
+@dataclass(frozen=True)
+class RecordingConfig:
+    dir: str = "recordings"          # local-only (gitignored)
+    codec: str = "lossless"          # lossless (HFYU .avi, bit-exact) | mjpg (.avi, ~25x smaller, slightly lossy)
+    queue_frames: int = 45           # frames the writer thread may fall behind before frames are dropped (and counted)
+    min_free_gb: float = 2.0         # refuse to start recording with less free disk than this
+
+    def resolve_dir(self) -> Path:
+        path = Path(self.dir)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+
 @dataclass(frozen=True)
 class VCamConfig:
     backend: str = "obs"
@@ -163,6 +188,8 @@ class Config:
     plate: PlateConfig = field(default_factory=PlateConfig)
     vanish: VanishConfig = field(default_factory=VanishConfig)
     triggers: TriggersConfig = field(default_factory=TriggersConfig)
+    audio: AudioConfig = field(default_factory=AudioConfig)
+    recording: RecordingConfig = field(default_factory=RecordingConfig)
     mappings: dict[str, str] = field(default_factory=dict)
     gestures: dict[str, dict[str, Any]] = field(default_factory=dict)
     spells: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -207,6 +234,21 @@ def _parse_camera(values: dict) -> CameraConfig:
     return CameraConfig(float(exposure))
 
 
+def _parse_audio(values: dict) -> AudioConfig:
+    device = values.get("device", None)
+    rest = {k: v for k, v in values.items() if k != "device"}
+    audio = _build(AudioConfig, "audio", rest)
+    if isinstance(device, str) and device.strip().lower() in ("", "auto", "default"):
+        device = None
+    if device is not None and (isinstance(device, bool) or not isinstance(device, (int, str))):
+        raise ConfigError(f"audio.device must be \"auto\", a device name or an index, got {device!r}")
+    if audio.block_ms < 5 or audio.block_ms > 200:
+        raise ConfigError("audio.block_ms must be between 5 and 200")
+    if audio.ring_seconds < 1:
+        raise ConfigError("audio.ring_seconds must be >= 1")
+    return dataclasses.replace(audio, device=device)
+
+
 def load_config(path: str | Path | None = None) -> Config:
     path = Path(path) if path else DEFAULT_CONFIG_PATH
     try:
@@ -229,6 +271,12 @@ def load_config(path: str | Path | None = None) -> Config:
     preview = _build(PreviewConfig, "preview", _section(raw, "preview"))
     plate = _build(PlateConfig, "plate", _section(raw, "plate"))
     vanish = _build(VanishConfig, "vanish", _section(raw, "vanish"))
+    audio = _parse_audio(_section(raw, "audio"))
+    recording = _build(RecordingConfig, "recording", _section(raw, "recording"))
+    if recording.codec not in RECORDING_CODECS:
+        raise ConfigError(f"recording.codec must be one of {RECORDING_CODECS}, got '{recording.codec}'")
+    if recording.queue_frames < 2 or recording.min_free_gb < 0:
+        raise ConfigError("recording.queue_frames must be >= 2 and recording.min_free_gb >= 0")
 
     if video.width <= 0 or video.height <= 0:
         raise ConfigError("video.width and video.height must be positive")
@@ -343,6 +391,8 @@ def load_config(path: str | Path | None = None) -> Config:
         plate=plate,
         vanish=vanish,
         triggers=triggers,
+        audio=audio,
+        recording=recording,
         mappings=dict(mappings),
         gestures=_section(raw, "gestures"),
         spells=_section(raw, "spells"),

@@ -13,6 +13,10 @@ import cv2
 import psutil
 
 from incanto.config import VANISH_STYLES, ConfigError, load_config
+from incanto.guided import GuidedPlan, GuidedSession, PlanError, load_plan, write_labels, LABELS_PATH
+from incanto.io.audio import print_devices, start_microphone
+from incanto.io.recorder import ClipRecorder, RecordingError
+from incanto.io.replay import Clip, ClipError, EndOfClip, ReplayAudio, ReplaySource
 from incanto.io.camera import (EXPOSURE_MAX, EXPOSURE_MIN, Camera, CameraError, ThreadedCamera,
                                install_exit_guard)
 from incanto.io.exposure_lock import ExposureLock
@@ -32,7 +36,7 @@ from incanto.utils.imaging import downscale
 from incanto.utils.logging import setup_logging
 
 log = logging.getLogger("incanto")
-PREVIEW_WINDOW = "Incanto preview (Q quit, D debug view, B capture plate, Shift+B force it, V vanish, G vanish style)"
+PREVIEW_WINDOW = "Incanto preview (Q quit, D debug view, B capture plate, Shift+B force it, V vanish, G vanish style, R record)"
 DEBUG_VIEWS = ("off", "sources", "leak")
 FPS_LOG_INTERVAL_S = 5.0
 PLATE_MISMATCH = "Plate doesn't match the room - press B"
@@ -114,7 +118,9 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         segment_every: int | None = None, evidence_dir: str | None = None,
         capture_mode: str | None = None, shots_dir: str | None = None,
         mask_mode: str | None = None, vanish_on_start: bool = False,
-        debug_view: str = "sources", vanish_style: str | None = None) -> int:
+        debug_view: str = "sources", vanish_style: str | None = None,
+        replay: str | None = None, realtime: bool = True, render_out: str | None = None,
+        record_guided: str | None = None, record_codec: str | None = None) -> int:
     try:
         cfg = load_config(config_path)
     except ConfigError as exc:
@@ -139,7 +145,20 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
     if perf_tweaks:
         winperf.apply_perf_tweaks()
 
-    cam = raw_cam = vcam = hands = segmenter = None
+    if record_codec is not None:
+        cfg = dataclasses.replace(cfg, recording=dataclasses.replace(cfg.recording, codec=record_codec))
+    replaying = replay is not None
+    plan = None
+    if record_guided:
+        try:
+            plan = load_plan(record_guided)
+        except PlanError as exc:
+            log.error("%s", exc)
+            return 2
+        if replaying or not show_preview:
+            log.error("--record-guided needs the live camera and the preview window (the prompts are drawn there)")
+            return 2
+    cam = raw_cam = vcam = hands = segmenter = recorder = mic = render_writer = None
     install_exit_guard()
     try:
         hands_model = cfg.models.resolve("hand_landmarker")
@@ -149,26 +168,38 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 raise SetupError(f"Model file missing: {path}\n"
                                  "  Run: python scripts/download_models.py")
 
-        raw_cam = Camera(cfg.video.width, cfg.video.height, cfg.video.fps)
-        # --lock-exposure overrides camera.exposure from config.yaml. Applied before the capture thread starts.
-        exposure = lock_exposure if lock_exposure is not None else cfg.camera.exposure
-        if exposure is not None:
-            raw_cam.apply_exposure(exposure)
+        if replaying:
+            clip = Clip.load(replay)
+            cam = ReplaySource(clip, realtime)
+            exposure, threaded = None, False
+            out_size = (cam.width, cam.height)
+            log.info("REPLAY of %s: %d frames over %.1fs (%dx%d), audio %s | %s | hands run synchronously for "
+                     "determinism; no webcam, microphone or virtual camera is opened", clip.path, clip.n_frames,
+                     clip.duration, cam.width, cam.height,
+                     f"{clip.audio().size / clip.samplerate:.1f}s" if clip.has_audio else "none",
+                     "paced by the recorded times (--realtime)" if realtime else "as fast as possible (--fast)")
         else:
-            raw_cam.apply_auto_exposure()  # explicit: the driver keeps a previous manual setting
-        threaded = cfg.video.capture_mode == "threaded"
-        cam = ThreadedCamera(raw_cam) if threaded else raw_cam
-        # Output size follows the real camera resolution so frames are always sent unchanged.
-        out_size = (cam.width, cam.height)
-        vcam = VirtualCamera(cam.width, cam.height, cfg.video.fps, cfg.vcam.backend)
-        log.info("Capture mode: %s", cfg.video.capture_mode)
+            raw_cam = Camera(cfg.video.width, cfg.video.height, cfg.video.fps)
+            # --lock-exposure overrides camera.exposure from config.yaml. Applied before the capture thread starts.
+            exposure = lock_exposure if lock_exposure is not None else cfg.camera.exposure
+            if exposure is not None:
+                raw_cam.apply_exposure(exposure)
+            else:
+                raw_cam.apply_auto_exposure()  # explicit: the driver keeps a previous manual setting
+            threaded = cfg.video.capture_mode == "threaded"
+            cam = ThreadedCamera(raw_cam) if threaded else raw_cam
+            # Output size follows the real camera resolution so frames are always sent unchanged.
+            out_size = (cam.width, cam.height)
+            vcam = VirtualCamera(cam.width, cam.height, cfg.video.fps, cfg.vcam.backend)
+            log.info("Capture mode: %s", cfg.video.capture_mode)
 
         p = cfg.perception
+        async_hands = p.hands_async and not replaying   # replay: synchronous, so runs are deterministic
         tracker = HandTracker(hands_model, num_hands=p.num_hands,
                               min_detection_confidence=p.hand_min_detection_confidence,
                               min_presence_confidence=p.hand_min_presence_confidence,
                               min_tracking_confidence=p.hand_min_tracking_confidence)
-        hands = HandsWorker(tracker) if p.hands_async else tracker
+        hands = HandsWorker(tracker) if async_hands else tracker
         segmenter = Segmenter(seg_model, out_size, blur_px=p.mask_blur_px,
                               feather_low=p.mask_feather_low, feather_high=p.mask_feather_high,
                               temporal_alpha=p.mask_temporal_alpha, every_n=p.segment_every_n,
@@ -212,7 +243,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
 
         # Exposure lock only when the camera runs on auto: a manual exposure from the config is already fixed.
         lock = (ExposureLock(set_camera_exposure, pc.lock_exposure_tolerance, pc.lock_exposure_settle_s)
-                if pc.lock_exposure and exposure is None else None)
+                if pc.lock_exposure and exposure is None and not replaying else None)
         shots = Path(shots_dir) if shots_dir else None  # local-only evidence images (gitignored)
         if shots:
             shots.mkdir(parents=True, exist_ok=True)
@@ -223,8 +254,33 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
             styler.set_plate(plate)
         status_msg, status_until = "", 0.0
         log.info("Perception ready: perception_width=%d, hands=%d (%s), segment every %d frame(s), preview every %d frame(s)",
-                 cfg.video.perception_width, p.num_hands, "async thread" if p.hands_async else "inline",
+                 cfg.video.perception_width, p.num_hands, "async thread" if async_hands else "inline",
                  p.segment_every_n, cfg.preview.every_n)
+
+        # microphone (live) or the recorded audio fed back on the recorded clock (replay)
+        audio_feed = ReplayAudio(clip, cfg.audio.ring_seconds, cfg.audio.offset_ms) if replaying else None
+        if replaying:
+            if not clip.has_audio:
+                log.info("This clip has no audio.")
+            mic_ring = audio_feed.ring if audio_feed.available else None
+        else:
+            mic = start_microphone(cfg.audio)
+            mic_ring = mic.ring if mic else None
+
+        def new_recorder(name: str | None = None) -> ClipRecorder:
+            return ClipRecorder(cfg.recording.resolve_dir(), out_size, cfg.video.fps, cfg.recording.codec, mic,
+                                cfg.recording.queue_frames, cfg.recording.min_free_gb, name)
+
+        guided = None
+        guided_done = False
+        if render_out:
+            ext = Path(render_out).suffix.lower()
+            Path(render_out).parent.mkdir(parents=True, exist_ok=True)
+            render_writer = cv2.VideoWriter(render_out, cv2.VideoWriter_fourcc(*("mp4v" if ext == ".mp4" else "MJPG")),
+                                            float(clip.nominal_fps), out_size)
+            if not render_writer.isOpened():
+                raise SetupError(f"cannot write {render_out} (use a .mp4 or .avi path)")
+            log.info("Rendering the composited output to %s (local-only: never commit it; no audio is written)", render_out)
 
         poll_key = getattr(cv2, "pollKey", None) or (lambda: cv2.waitKey(1))  # pollKey: OpenCV >= 4.5.4
         preview_size = None  # None = full size
@@ -240,6 +296,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         proc = psutil.Process()
         proc.cpu_percent(None)  # prime the counter
         start = last_log = last_frame = time.perf_counter()
+        if replaying:
+            last_frame = clip.first_time - 1.0 / clip.nominal_fps  # the first dt is one nominal frame
         frames = frames_since_log = 0
         hud_mode = DEBUG_VIEWS.index(debug_view)  # D cycles off -> sources -> leak
         last_stage_ms: dict[str, float] = {}
@@ -248,18 +306,23 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                  "B/V/D/S/Q are read from the preview window). mask_mode=%s", cfg.vanish.mask_mode)
 
         while True:
-            frame = cam.read(timer)
-            now = time.perf_counter()
+            try:
+                frame = cam.read(timer)
+            except EndOfClip:
+                log.info("Replay finished: all %d frames.", clip.n_frames)
+                break
+            now = cam.frame_time if replaying else time.perf_counter()   # replay runs on the recorded clock
+            frame_t = cam.frame_time if threaded or replaying else now    # when this frame was captured
             dt = now - last_frame  # seconds since the previous frame; effects must use this
             last_frame = now
-            rx_last = now
+            rx_last = time.perf_counter()
             if rx_first is None:
                 rx_first = rx_last
             rx_count += 1
 
             with timer.stage("downscale"):
                 small = downscale(frame, cfg.video.perception_width)
-            if p.hands_async:
+            if async_hands:
                 # Never waits: hand the newest frame to the worker, use whatever result is newest.
                 hands.submit(small, getattr(cam, "frame_time", now))
                 hand_result = hands.latest()
@@ -268,9 +331,27 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     timer.add("hands_age", time.perf_counter() - hand_result.frame_time)
             else:
                 with timer.stage("hands"):
-                    hand_list = hands.detect(small)
+                    hand_list = hands.detect(small, cam.timestamp_ms() if replaying else None)
             with timer.stage("segment"):
-                mask = segmenter.segment(small)
+                mask = segmenter.segment(small, cam.timestamp_ms() if replaying else None)
+            if audio_feed is not None:
+                audio_feed.feed_until(now)
+            if plan is not None and not guided_done:
+                if guided is None:  # first frame: start recording and the plan together
+                    try:
+                        recorder = new_recorder("guided-" + time.strftime("%Y%m%d-%H%M%S"))
+                        recorder.start()
+                    except RecordingError as exc:
+                        log.error("%s", exc)
+                        return 1
+                    guided = GuidedSession(plan, now)
+                    log.info("Guided recording '%s' started: %s | %s | about %.0f s. Follow the prompts in the preview "
+                             "window; the beep is the cue. Q aborts.", plan.name, plan.counts(),
+                             f"{len(plan.talks)} talk segment(s)", plan.duration_s)
+                for event in guided.update(now):
+                    cues.play(event)
+                if guided.finished:
+                    guided_done = True
 
             if capture.active:
                 capture.update(frame, mask, now)  # raw frame, never the composited one
@@ -389,7 +470,12 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
             else:
                 out = frame
             with timer.stage("vcam"):
-                vcam.send(out)  # clean frame: no debug drawing ever reaches the virtual camera
+                if vcam:
+                    vcam.send(out)  # clean frame: no debug drawing ever reaches the virtual camera
+            if render_writer is not None:
+                render_writer.write(out)
+            if recorder is not None and recorder.active:
+                recorder.submit(frame, frame_t)  # the RAW camera frame, before any effect
             fps_counter.tick()
             frames += 1
             frames_since_log += 1
@@ -410,6 +496,12 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     else:
                         overlay.draw_status(preview, "Leak view needs vanish ON (press V)", row=1)
                 overlay.draw_fps(preview, fps_counter.fps)
+                if recorder is not None and recorder.active:
+                    overlay.draw_rec(preview, recorder.elapsed, recorder.dropped)
+                if mic_ring is not None:
+                    overlay.draw_audio_level(preview, mic_ring.level_dbfs())
+                if guided is not None and guided.prompt is not None:
+                    overlay.draw_cue(preview, guided.prompt.text, guided.prompt.sub, guided.prompt.go)
                 if not plate:
                     plate_line = "plate: none (press B)"
                 elif monitor.health is not None and not monitor.health.ok and (not vanish_on or monitor.tripped(now)):
@@ -452,7 +544,26 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                             cam.request_exposure(exposure)
                         else:
                             cam.set_exposure(exposure)
-                if key in (ord("b"), ord("B")):
+                if key in (ord("r"), ord("R")):
+                    if replaying:
+                        log.info("R records the live camera; this is a replay.")
+                    elif plan is not None:
+                        log.info("A guided recording is running; it stops by itself (Q aborts).")
+                    elif recorder is not None and recorder.active:
+                        summary = recorder.stop()
+                        status_msg, status_until = f"Recording saved: {summary.frames} frames", now + 4.0
+                    else:
+                        try:
+                            recorder = new_recorder()
+                            recorder.start()
+                        except RecordingError as exc:
+                            log.error("%s", exc)
+                            status_msg, status_until = str(exc), now + 6.0
+                            cues.play("error")
+                            recorder = None
+                if key in (ord("b"), ord("B")) and (replaying or plan is not None):
+                    log.info("B (plate capture) needs the live camera and is off during replay and guided recording.")
+                elif key in (ord("b"), ord("B")):
                     if capture.active:
                         capture.cancel()
                         log.info("Plate capture cancelled.")
@@ -514,11 +625,25 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     break
                 timer.add("preview", time.perf_counter() - t_preview)
 
+            if guided_done and recorder is not None and recorder.active:
+                time.sleep(0.8)  # let the closing beep finish
+                summary = recorder.stop()
+                gestures, talks = guided.label_entries(summary.first_frame_time)
+                write_labels(LABELS_PATH, summary.path.name, gestures, talks,
+                             {"plan": plan.name, "frames": summary.frames, "dropped_frames": summary.dropped})
+                log.info("Guided recording finished: %s | %d cues labelled, %d talk segment(s) | labels written to %s "
+                         "(commit that file; the clip stays local-only)", summary.path, len(gestures), len(talks),
+                         LABELS_PATH)
+                if summary.dropped:
+                    log.warning("%d frames were dropped while recording: the clip has gaps (see the sidecar). "
+                                "Consider --record-codec mjpg and recording again.", summary.dropped)
+                break
+
             now = time.perf_counter()
             if now - last_log >= FPS_LOG_INTERVAL_S:
                 averages = {**(cam.timer.averages_ms() if threaded else {}), **timer.averages_ms()}
                 hands_hz = hands_ms = None
-                if p.hands_async:
+                if async_hands:
                     hands_hz, hands_ms = hands.pop_stats()
                     averages["hands"] = hands_ms  # inference time, measured on the worker thread
                 last_stage_ms = {k: averages[k] for k in ("hands", "segment") if k in averages}
@@ -533,7 +658,7 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                          f" | vanish={styler.style}" if vanish_on else "",
                          proc.cpu_percent(None))
                 rx_first, rx_count = None, 0
-                if p.hands_async:
+                if async_hands:
                     log.info("hands worker: %.1f Hz, inference %.1f ms, result age %.1f ms (at main-loop use)",
                              hands_hz, hands_ms, averages.get("hands_age", 0.0))
                 log.info("camera: exposure=%s (our setting; driver readback is unreliable) | power=%s",
@@ -581,13 +706,24 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
         elapsed = time.perf_counter() - start
         log.info("Summary: %d frames in %.1fs = %.1f FPS average", frames, elapsed, frames / elapsed)
         return 0
-    except (CameraError, VCamError, SetupError) as exc:
+    except (CameraError, VCamError, SetupError, ClipError, RecordingError) as exc:
         log.error("%s", exc)
         return 1
     except KeyboardInterrupt:
         log.info("Interrupted.")
         return 0
     finally:
+        if recorder is not None and recorder.active:
+            try:
+                recorder.stop()  # keep what was recorded even when the app exits mid-recording
+                if plan is not None and not guided_done:
+                    log.warning("Guided recording aborted before the end: no labels were written for this clip.")
+            except Exception:  # noqa: BLE001
+                log.exception("Stopping the recorder failed")
+        if render_writer is not None:
+            render_writer.release()
+        if mic is not None:
+            mic.stop()
         for closable in (hands, segmenter, vcam):
             if closable:
                 closable.close() if hasattr(closable, "close") else None
@@ -635,9 +771,33 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--shots-dir", metavar="DIR",
                         help="local-only evidence: S saves the clean vcam frame here (vanished.png when V is on, "
                              "else live-with-me.png); plate.png is saved on each plate capture")
+    parser.add_argument("--list-audio-devices", action="store_true",
+                        help="list microphone inputs (virtual ones are marked), say which one would be used, then exit")
+    parser.add_argument("--record-codec", choices=("lossless", "mjpg"),
+                        help="override recording.codec (lossless = HFYU, bit-exact, 1.7 GB/min; mjpg = ~25x smaller)")
+    parser.add_argument("--replay", metavar="CLIP",
+                        help="replay a recorded clip folder (recordings/<clip>) through the full pipeline instead of the "
+                             "webcam and microphone")
+    pace = parser.add_mutually_exclusive_group()
+    pace.add_argument("--realtime", action="store_true", help="replay paced by the recorded times (default)")
+    pace.add_argument("--fast", action="store_true", help="replay as fast as the pipeline can go")
+    parser.add_argument("--render-out", metavar="FILE",
+                        help="with --replay: save the composited output (no audio) to a .mp4/.avi for local review; "
+                             "never commit it")
+    parser.add_argument("--record-guided", metavar="PLAN",
+                        help="guided recording: prompts and beeps through a plan (e.g. plans/fixture-plan.yaml), records "
+                             "the clip and writes tests/fixtures/labels.yaml")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args(argv)
     setup_logging(args.log_level)
+    if args.list_audio_devices:
+        return print_devices()
+    if args.render_out and not args.replay:
+        parser.error("--render-out needs --replay")
+    if (args.fast or args.realtime) and not args.replay:
+        parser.error("--realtime/--fast need --replay")
+    if args.replay and args.record_guided:
+        parser.error("--replay and --record-guided cannot be combined")
     if args.reset_camera:
         return reset_camera(args.config)
     if args.camera_settings:
@@ -645,7 +805,8 @@ def main(argv: list[str] | None = None) -> int:
     return run(args.config, args.seconds, not args.no_preview, args.lock_exposure,
                not args.no_perf_tweaks, args.segment_every, args.evidence, args.capture_mode,
                args.shots_dir, args.mask_mode,
-               args.vanish_on_start, args.debug_view, args.vanish_style)
+               args.vanish_on_start, args.debug_view, args.vanish_style,
+               args.replay, not args.fast, args.render_out, args.record_guided, args.record_codec)
 
 
 if __name__ == "__main__":
