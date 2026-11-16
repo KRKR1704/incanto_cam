@@ -18,8 +18,11 @@ perception:
   mask_feather_low: 0.35       # confidence at/below this -> 0
   mask_feather_high: 0.65      # confidence at/above this -> 1 (smooth in between)
   mask_temporal_alpha: 0.6     # weight of the new mask vs the previous one (1 = no smoothing)
-  segment_every_n: 2           # run segmentation every Nth frame, reuse the last mask otherwise
-                               # (2: loop was 17-20 fps with 1; see docs/evidence/phase-2/)
+  mask_temporal: attack_release  # attack_release: mask = max(current, previous * decay), so it grows
+                               # instantly and shrinks slowly; symmetric: the old alpha blend
+  mask_release_decay: 0.85     # attack_release: how much of the previous mask survives each frame
+  segment_every_n: 1           # run segmentation every Nth frame (every frame: vanish needs a fresh mask;
+                               # 2 was needed in Phase 2 when hands ran inline, now they run on a thread)
   hands_async: true            # hand tracking on its own thread, always on the latest frame
 
 camera:
@@ -27,7 +30,87 @@ camera:
                                # keeps the camera at 30 fps in dim rooms; [ and ] nudge it while running
 
 preview:
-  every_n: 2                   # update the preview window every Nth frame (vcam output is every frame)
+  every_n: 3                   # update the preview window every Nth frame (vcam output is every frame); 2 costs ~2 FPS more
+                               # with the vanish debug views (preview drawing is ~8-13 ms per shown frame)
+  scale: 0.5                   # preview window at half size: about half the preview cost. The virtual camera
+                               # output is always full resolution; 1.0 = full-size preview
+
+vanish:                        # the mask used when V replaces you with the plate. Over-covering is free,
+                               # under-covering shows you, so everything is biased toward covering.
+  mask_mode: full              # seg_only | seg_hands | full (segmenter + hand hulls + plate difference)
+  dilate_px: 15                # grow the segmenter mask (px at 1280 wide)
+  hand_hull_dilate_px: 25      # grow each hand's filled convex hull (landmarks are ~50 ms old)
+  core_threshold: 0.1          # a pixel is "covered" (alpha exactly 1.0) if ANY source exceeds this
+  core_close_px: 15            # close pinholes in the solid core
+  outer_feather_px: 12         # blend ring OUTSIDE the solid core only, so the soft edge never overlaps you
+  plate_diff_metric: max_channel  # gray | max_channel | lab: how |live - matched plate| is measured
+                               # (gray missed 90% of the leaking pixels near me: similar brightness, other colour)
+  plate_diff_threshold: 28     # levels of difference counted as "not background"
+  plate_diff_open_px: 3        # morphological open on the difference mask (remove speckle)
+  plate_diff_close_px: 9       # morphological close (fill holes)
+  plate_diff_release_decay: 0.8  # fast attack, slow release for the difference mask and the near-me zone
+  plate_diff_large_blob_fraction: 0.05  # a difference this big (fraction of the frame) counts anywhere, so a
+                               # segmenter dropout cannot expose you; 0 = plate difference only near me
+  plate_diff_cell_guard: true  # per grid cell: ignore the difference where a neutral lighting gain explains it
+  plate_diff_wash_fraction: 0.85  # guard: cell is a "wash" if this much of its uncovered pixels differ...
+  plate_diff_wash_residual: 12.0  # ...and one neutral gain explains the cell to within this many levels
+  near_me_px: 70               # plate difference only counts this far around the mask; moved objects
+                               # elsewhere stay live
+  plate_match: gain_map        # off | gain | gain_offset (one global correction) | gain_map (per-cell gain grid)
+  plate_match_cells_x: 8       # gain_map grid
+  plate_match_cells_y: 6
+  plate_match_smoothing: 0.15  # weight of each frame's estimate in the running gain/offset
+  match_margin_px: 30          # background used for matching lies this far outside the mask
+  plate_refresh_alpha: 0.02    # while vanish is on and the plate is healthy: blend this much of each live
+                               # frame into the plate around the mask, so it tracks daylight (0 = off). Only
+                               # pixels every mask source calls background AND that still match the matched plate
+  plate_refresh_margin_px: 15  # the refresh stays this far outside the mask (all sources, plus the feather)
+  style: freeze                # freeze | region | live. What is shown while vanished (G cycles them in the preview):
+                               #   freeze = the whole frame is the plate (gain-matched once when V turns on, held
+                               #            fixed, plus synthetic grain): no mask, so no outline however you move
+                               #   region = a big soft region (all mask sources ever seen this session, grown by
+                               #            region_margin_px, feathered by region_feather_px) shows the plate;
+                               #            the rest stays live. The region only grows while vanished
+                               #   live   = the per-frame mask composite (the Phase 3 behaviour)
+  region_margin_px: 120        # region style: grow the accumulated mask sources by this (px at 1280 wide)
+  region_feather_px: 60        # region style: soft edge outside that
+  transition_s: 0.4            # V on/off crossfade (freeze and region; live cuts), time-based; 0 = hard cut
+  reappear_fade_s: 1.0         # freeze: when V turns vanish off and the room no longer passes the structure check
+                               # (furniture moved while you were invisible), log a warning and fade back this slowly
+  grain_scale: 1.0             # synthetic grain on plate pixels, x the noise measured at plate capture; 0 = off
+
+plate:                         # clean plate of the empty room (plates/ is local-only, gitignored)
+  frames: 30                   # frames averaged into the plate
+  countdown_s: 5.0             # countdown after pressing B: time to leave the frame
+  settle_s: 1.0                # extra wait for auto exposure to settle on the empty room
+  max_person_coverage: 0.02    # abort the capture if MOVING person blobs cover more than this fraction
+  static_blob_max_motion: 0.02 # a segmenter blob in which less than this share of pixels moved during the last
+                               # second is furniture (a chair with a headrest), not a person. Measured: a person
+                               # sitting still 6-40%, static background 0.3%. Shift+B skips the person check
+  debug_dir: docs/evidence/phase-3  # an aborted capture saves a local-only image here showing what was detected
+  dir: plates
+  sounds: true                 # beeps: each countdown second, capturing, captured OK, error (Windows only)
+  # Plate health: checked when you press V and continuously after. If the plate does not match the
+  # visible background, vanish is refused / switched off and you are asked to press B.
+  # The plate is judged AFTER gain-map matching, so auto-exposure swings do not count against it.
+  health_max_residual: 3.5     # mean over grid cells of |cell-mean (live - matched plate)| in levels (the log's
+                               # "per-cell residual mean|r|"). Measured here: ~1 fresh plate, up to 2.7 with a
+                               # 1.5x exposure change or a moved chair, 4.2-5.1 for the previous evening's plate
+  health_min_structure: 0.35   # edge (gradient) correlation of plate vs live, blind to brightness. Measured:
+                               # 0.95 unchanged, 0.54 chair moved + door opened, 0.2 camera shifted 2% of the width
+  health_gain_min: 0.5         # loose sanity cap on the global live/plate gain
+  health_gain_max: 2.0
+  health_min_cell_background: 0.5  # only cells with at least this share of background are judged
+  health_hysteresis: 0.2       # after a failed check, pass again only this far inside the limits
+  health_check_s: 0.5          # seconds between checks
+  health_fail_s: 3.0           # while vanish is on, failing for this long switches it off
+  health_nudge_residual: 2.0   # softer limit: residual above this for health_nudge_s while vanished gives one soft
+  health_nudge_s: 10.0         # beep and "Lighting changed - press B to refresh plate"; vanish stays on
+  lock_exposure: true          # after a capture in auto mode, sweep manual exposures (<= -5, so 30 fps holds),
+                               # lock the one closest to the plate's brightness; B returns to auto first
+  lock_exposure_tolerance: 0.25  # lock only if live gets within this fraction of the plate's brightness,
+                               # otherwise stay on auto
+  lock_exposure_settle_s: 0.7  # wait after each exposure change before measuring
 
 vcam:
   backend: obs                 # obs | unitycapture

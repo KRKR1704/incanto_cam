@@ -84,3 +84,42 @@ def test_hands_worker_publishes_latest_result_without_blocking():
         assert result.seq <= 5
     finally:
         worker.close()
+
+
+@needs_models
+def test_segmenter_attack_release_grows_instantly_and_shrinks_slowly():
+    class Fake:
+        def __init__(self):
+            self.value = 0.0
+
+        def segment_for_video(self, image, ts):
+            class Mask:
+                def __init__(self, v):
+                    self.v = v
+
+                def numpy_view(self):
+                    return np.full((36, 64), self.v, np.float32)
+
+            class Result:
+                pass
+
+            r = Result()
+            r.confidence_masks = [Mask(self.value)]
+            return r
+
+        def close(self):
+            pass
+
+    seg = Segmenter(SEG_MODEL, (64, 36), blur_px=0, temporal_mode="attack_release", release_decay=0.5)
+    fake = Fake()
+    seg._segmenter.close()
+    seg._segmenter = fake
+    frame = np.zeros((36, 64, 3), np.uint8)
+    fake.value = 1.0
+    assert seg.segment(frame).mean() == pytest.approx(1.0)   # attack: instant
+    fake.value = 0.0
+    assert seg.segment(frame).mean() == pytest.approx(0.5)   # release: previous * decay
+    assert seg.segment(frame).mean() == pytest.approx(0.25)
+    seg.temporal_mode = "symmetric"
+    fake.value = 1.0
+    assert seg.segment(frame).mean() < 0.9                    # symmetric blend does not jump

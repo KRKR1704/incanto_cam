@@ -46,18 +46,99 @@ class PerceptionConfig:
     mask_feather_low: float = 0.35
     mask_feather_high: float = 0.65
     mask_temporal_alpha: float = 0.6
-    segment_every_n: int = 2
+    mask_temporal: str = "attack_release"  # attack_release | symmetric
+    mask_release_decay: float = 0.85       # attack_release: mask = max(current, previous * decay)
+    segment_every_n: int = 1
     hands_async: bool = True
 
 
 @dataclass(frozen=True)
 class PreviewConfig:
     every_n: int = 2
+    scale: float = 0.5                   # preview window size relative to the camera frame (the vcam output is never scaled)
 
 
 @dataclass(frozen=True)
 class CameraConfig:
     exposure: float | None = None  # None = auto; else manual exposure in log2 seconds (e.g. -6 = 1/64 s)
+
+
+VANISH_MASK_MODES = ("seg_only", "seg_hands", "full")
+VANISH_STYLES = ("freeze", "region", "live")
+PLATE_MATCH_MODES = ("off", "gain", "gain_offset", "gain_map")
+PLATE_DIFF_METRICS = ("gray", "max_channel", "lab")
+
+
+@dataclass(frozen=True)
+class VanishConfig:
+    """Mask used when the person is replaced by the plate. Over-covering is free (the plate IS the
+    background); under-covering reveals the person, so everything here biases toward covering.
+    Pixel sizes are at 1280 px frame width and are scaled to the perception resolution."""
+    mask_mode: str = "full"              # seg_only | seg_hands | full (seg + hands + plate difference)
+    dilate_px: int = 15                  # grow the segmenter mask
+    hand_hull_dilate_px: int = 25        # grow the filled convex hull of each hand (landmarks are ~50 ms old)
+    core_threshold: float = 0.1          # a pixel is "covered" (alpha exactly 1) if any source exceeds this
+    core_close_px: int = 15              # close pinholes in the solid core
+    outer_feather_px: int = 12           # blend ring OUTSIDE the solid core only (the ring never overlaps you)
+    plate_diff_metric: str = "max_channel"  # gray | max_channel | lab: how |live - matched plate| is measured
+    plate_diff_threshold: int = 28       # levels of difference that count as "not background"
+    plate_diff_open_px: int = 3          # morphological open: remove speckle
+    plate_diff_close_px: int = 9         # morphological close: fill holes
+    plate_diff_release_decay: float = 0.8  # fast attack / slow release for the difference mask and zone
+    plate_diff_large_blob_fraction: float = 0.05  # body-sized differences count anywhere (0 = only near me)
+    plate_diff_cell_guard: bool = True   # per-cell lighting guard replaces the old global kill switch
+    plate_diff_wash_fraction: float = 0.85  # guard: a cell is a "wash" if this much of it differs...
+    plate_diff_wash_residual: float = 12.0  # ...and one neutral gain explains it to within this many levels
+    near_me_px: int = 70                 # the plate difference is only allowed this far around the mask
+    plate_match: str = "gain_map"        # off | gain | gain_offset | gain_map: match the plate to live brightness/colour
+    plate_match_cells_x: int = 8         # gain_map grid size
+    plate_match_cells_y: int = 6
+    plate_match_smoothing: float = 0.15  # weight of each frame's estimate in the running gain/offset
+    match_margin_px: int = 30            # background used for matching is this far outside the mask
+    plate_refresh_alpha: float = 0.02    # per frame: blend live pixels into the plate around the mask (0 = off)
+    plate_refresh_margin_px: int = 15    # the refresh stays this far outside the mask (every source, plus feather)
+    # Vanish styles (render/vanish_style.py): what is shown while vanished. The mask code above is kept for all of them.
+    style: str = "freeze"                # freeze (whole frame = plate, no mask) | region | live (the masked composite)
+    region_margin_px: int = 120          # region: every mask source ever seen this session, grown by this much (at 1280 wide)
+    region_feather_px: int = 60          # region: soft edge outside that, so there is no visible outline
+    transition_s: float = 0.4            # V on/off crossfades over this long (time-based, uses dt); 0 = hard cut
+    reappear_fade_s: float = 1.0         # freeze: the fade back to live takes this long if the room fails the structure check
+    grain_scale: float = 1.0             # synthetic camera grain on frozen plate pixels, x the captured noise; 0 = off
+
+
+@dataclass(frozen=True)
+class PlateConfig:
+    frames: int = 30                     # frames averaged into the clean plate
+    countdown_s: float = 5.0             # countdown after pressing B (time to leave the frame)
+    settle_s: float = 1.0                # extra wait for auto exposure to settle on the empty room
+    max_person_coverage: float = 0.02    # abort if the mask covers more than this fraction of the frame
+    dir: str = "plates"                  # local-only (gitignored): a photo of your room
+    static_blob_max_motion: float = 0.02  # capture: a segmenter blob with a smaller share of moving pixels is furniture
+    debug_dir: str = "docs/evidence/phase-3"  # local-only (images there are gitignored): aborted-capture debug images
+    sounds: bool = True                  # beeps for countdown / capturing / captured / error (winsound, Windows only)
+    # Plate health, judged AFTER gain-map matching (exposure swings are not a plate problem); see plate/health.py.
+    health_max_residual: float = 3.5     # mean over cells of |cell-mean (live - matched plate)|, levels
+    health_min_structure: float = 0.35   # gradient (edge) correlation of plate vs live; ignores brightness
+    health_gain_min: float = 0.5         # loose sanity cap on the global live/plate gain
+    health_gain_max: float = 2.0
+    health_min_cell_background: float = 0.5  # only cells with this share of background are judged
+    health_hysteresis: float = 0.2       # after a failure, pass only with this much margin inside the limits
+    health_check_s: float = 0.5          # how often the plate is checked against the room
+    health_fail_s: float = 3.0           # while vanish is on: failing for this long switches vanish off
+    health_nudge_residual: float = 2.0   # softer limit: above it for health_nudge_s, suggest a new plate (vanish stays on)
+    health_nudge_s: float = 10.0
+    # Exposure lock: after a capture in auto mode, fix the exposure so it cannot swing while the plate is in use.
+    lock_exposure: bool = True
+    lock_exposure_tolerance: float = 0.25  # lock only if live brightness gets within this fraction of the plate's
+    lock_exposure_settle_s: float = 0.7  # wait after each exposure change before measuring
+
+    def resolve_dir(self) -> Path:
+        path = Path(self.dir)
+        return path if path.is_absolute() else PROJECT_ROOT / path
+
+    def resolve_debug_dir(self) -> Path:
+        path = Path(self.debug_dir)
+        return path if path.is_absolute() else PROJECT_ROOT / path
 
 
 @dataclass(frozen=True)
@@ -79,6 +160,8 @@ class Config:
     models: ModelsConfig = field(default_factory=ModelsConfig)
     perception: PerceptionConfig = field(default_factory=PerceptionConfig)
     preview: PreviewConfig = field(default_factory=PreviewConfig)
+    plate: PlateConfig = field(default_factory=PlateConfig)
+    vanish: VanishConfig = field(default_factory=VanishConfig)
     triggers: TriggersConfig = field(default_factory=TriggersConfig)
     mappings: dict[str, str] = field(default_factory=dict)
     gestures: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -144,6 +227,8 @@ def load_config(path: str | Path | None = None) -> Config:
     models = _build(ModelsConfig, "models", _section(raw, "models"))
     perception = _build(PerceptionConfig, "perception", _section(raw, "perception"))
     preview = _build(PreviewConfig, "preview", _section(raw, "preview"))
+    plate = _build(PlateConfig, "plate", _section(raw, "plate"))
+    vanish = _build(VanishConfig, "vanish", _section(raw, "vanish"))
 
     if video.width <= 0 or video.height <= 0:
         raise ConfigError("video.width and video.height must be positive")
@@ -172,11 +257,76 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError("perception.mask_temporal_alpha must be in (0, 1]")
     if perception.mask_blur_px < 0:
         raise ConfigError("perception.mask_blur_px must be >= 0")
+    if perception.mask_temporal not in ("attack_release", "symmetric"):
+        raise ConfigError("perception.mask_temporal must be 'attack_release' or 'symmetric'")
+    if not 0 <= perception.mask_release_decay < 1:
+        raise ConfigError("perception.mask_release_decay must be in [0, 1)")
     if perception.segment_every_n < 1:
         raise ConfigError("perception.segment_every_n must be >= 1")
 
     if preview.every_n < 1:
         raise ConfigError("preview.every_n must be >= 1")
+    if not 0.25 <= preview.scale <= 1:
+        raise ConfigError("preview.scale must be between 0.25 and 1")
+
+    if vanish.mask_mode not in VANISH_MASK_MODES:
+        raise ConfigError(f"vanish.mask_mode must be one of {VANISH_MASK_MODES}, got '{vanish.mask_mode}'")
+    if vanish.style not in VANISH_STYLES:
+        raise ConfigError(f"vanish.style must be one of {VANISH_STYLES}, got '{vanish.style}'")
+    if vanish.region_margin_px < 0 or vanish.region_feather_px < 0:
+        raise ConfigError("vanish.region_margin_px and vanish.region_feather_px must be >= 0")
+    if vanish.transition_s < 0 or vanish.reappear_fade_s < 0:
+        raise ConfigError("vanish.transition_s and vanish.reappear_fade_s must be >= 0 (0 = hard cut)")
+    if not 0 <= vanish.grain_scale <= 4:
+        raise ConfigError("vanish.grain_scale must be between 0 (off) and 4")
+    if vanish.plate_match not in PLATE_MATCH_MODES:
+        raise ConfigError(f"vanish.plate_match must be one of {PLATE_MATCH_MODES}, got '{vanish.plate_match}'")
+    if vanish.plate_diff_metric not in PLATE_DIFF_METRICS:
+        raise ConfigError(f"vanish.plate_diff_metric must be one of {PLATE_DIFF_METRICS}, got '{vanish.plate_diff_metric}'")
+    for key in ("dilate_px", "hand_hull_dilate_px", "core_close_px", "outer_feather_px", "plate_diff_open_px",
+                "plate_diff_close_px", "match_margin_px", "plate_diff_threshold", "near_me_px",
+                "plate_diff_wash_residual", "plate_refresh_margin_px"):
+        if getattr(vanish, key) < 0:
+            raise ConfigError(f"vanish.{key} must be >= 0")
+    if not (1 <= vanish.plate_match_cells_x <= 64 and 1 <= vanish.plate_match_cells_y <= 64):
+        raise ConfigError("vanish.plate_match_cells_x and plate_match_cells_y must be between 1 and 64")
+    if not 0 < vanish.plate_match_smoothing <= 1:
+        raise ConfigError("vanish.plate_match_smoothing must be in (0, 1]")
+    if not 0 <= vanish.core_threshold < 1:
+        raise ConfigError("vanish.core_threshold must be in [0, 1)")
+    if not 0 <= vanish.plate_diff_release_decay < 1:
+        raise ConfigError("vanish.plate_diff_release_decay must be in [0, 1)")
+    if not 0 <= vanish.plate_diff_large_blob_fraction <= 1:
+        raise ConfigError("vanish.plate_diff_large_blob_fraction must be between 0 and 1")
+    if not 0 < vanish.plate_diff_wash_fraction <= 1:
+        raise ConfigError("vanish.plate_diff_wash_fraction must be in (0, 1]")
+    if not 0 <= vanish.plate_refresh_alpha <= 0.5:
+        raise ConfigError("vanish.plate_refresh_alpha must be between 0 (off) and 0.5")
+
+    if plate.frames < 1:
+        raise ConfigError("plate.frames must be >= 1")
+    if plate.countdown_s < 0 or plate.settle_s < 0:
+        raise ConfigError("plate.countdown_s and plate.settle_s must be >= 0")
+    if not 0 <= plate.max_person_coverage <= 1:
+        raise ConfigError("plate.max_person_coverage must be between 0 and 1")
+    if plate.health_max_residual <= 0:
+        raise ConfigError("plate.health_max_residual must be > 0")
+    if plate.health_nudge_residual <= 0 or plate.health_nudge_s < 0:
+        raise ConfigError("plate.health_nudge_residual must be > 0 and plate.health_nudge_s >= 0")
+    if not 0 <= plate.static_blob_max_motion <= 1:
+        raise ConfigError("plate.static_blob_max_motion must be between 0 and 1 (0 = every blob counts as a person)")
+    if not -1 <= plate.health_min_structure < 1:
+        raise ConfigError("plate.health_min_structure must be in [-1, 1)")
+    if not 0 < plate.health_gain_min < 1 < plate.health_gain_max:
+        raise ConfigError("plate.health_gain_min must be in (0, 1) and plate.health_gain_max above 1")
+    if not 0 < plate.health_min_cell_background <= 1:
+        raise ConfigError("plate.health_min_cell_background must be in (0, 1]")
+    if not 0 <= plate.health_hysteresis < 1:
+        raise ConfigError("plate.health_hysteresis must be in [0, 1)")
+    if plate.health_check_s <= 0 or plate.health_fail_s < 0:
+        raise ConfigError("plate.health_check_s must be > 0 and plate.health_fail_s >= 0")
+    if not 0 < plate.lock_exposure_tolerance < 1 or plate.lock_exposure_settle_s < 0:
+        raise ConfigError("plate.lock_exposure_tolerance must be in (0, 1) and plate.lock_exposure_settle_s >= 0")
 
     mappings = _section(raw, "mappings")
     for gesture, spell in mappings.items():
@@ -190,6 +340,8 @@ def load_config(path: str | Path | None = None) -> Config:
         models=models,
         perception=perception,
         preview=preview,
+        plate=plate,
+        vanish=vanish,
         triggers=triggers,
         mappings=dict(mappings),
         gestures=_section(raw, "gestures"),
