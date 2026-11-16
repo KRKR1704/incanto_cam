@@ -20,7 +20,7 @@ Cast effects on your video calls with a gesture: a local, gesture-triggered vide
 
 See `docs/incanto-project-plan.md` and `docs/incanto-build-tasks.md` for the plan.
 
-**Status: Phase 4 in progress** (record and replay tooling is built; the labelled fixture clip still has to be recorded). Phases 0-3 are complete (camera pipeline, perception, clean plate and vanish test).
+**Status: Phase 4 complete** (record and replay, with a labelled fixture clip). Phases 0-3 are complete (camera pipeline, perception, clean plate and vanish test).
 
 ## Vanish test (Phase 3)
 
@@ -61,7 +61,9 @@ Everything here is local-only: clips, audio and renders live in `recordings/` (g
 
 **Guided recording.** `python -m incanto --record-guided plans/fixture-plan.yaml` prompts you through a plan: for each cue two soft ticks, then a higher beep and a big on-preview prompt ("SNAP NOW"); do the gesture on the beep. The plan has 10 snaps, 10 claps, 10 thumbs-ups with random gaps and rests, then 2 minutes of "talk normally with your hands" with no cues. The cue times are written to `tests/fixtures/labels.yaml` (gesture, time from the clip's first frame, tolerance window of +-0.6 s, plus the talk stretches in which nothing may fire). Commit that file; the clip stays local.
 
-**Checks.** `scripts/check_av_sync.py recordings/<clip>` finds claps in the audio and the frame where your wrists meet, and reports the audio-video offset (target: within one frame, 33 ms); if there is a consistent offset it suggests `audio.offset_ms`, which is added to every audio timestamp, live and replay. `scripts/check_determinism.py recordings/<clip>` replays the clip with two independent sets of hand tracker and segmenter and reports the largest difference in landmarks and masks. Both accept `--report docs/evidence/phase-4/<name>.txt` for a committable text report.
+**Checks.** `scripts/check_av_sync.py recordings/<clip>` finds each clap in the audio and in the video and reports the audio-video offset (target: within one frame, 33 ms); if there is a consistent offset it suggests `audio.offset_ms`, which is added to every audio timestamp, live and replay. The video side is timed from motion (the last frame that still shows the fast approach and the first that shows the hands stopped), not from wrist landmarks, because hand tracking loses both hands for 150-350 ms around a clap. `scripts/check_cues.py recordings/<clip>` checks every labelled cue against the recording (hand visible, sound spike, thumbs-up pose, when relative to the beep) and never edits `labels.yaml`. `scripts/check_determinism.py recordings/<clip>` replays the clip with two independent sets of hand tracker and segmenter and reports the largest difference in landmarks and masks. The scripts accept `--report docs/evidence/phase-4/<name>.txt` for a committable text report.
+
+**Two things measured on the first guided clip.** (1) The webcam repeated every other frame (50% of frames identical): in this lighting the picture updates at about 15 fps even though 30 frames a second arrive, so timing from video is good to about 66 ms per event; more light, or a manual exposure that keeps 30 fps, fixes it. (2) People react to a beep 0.5-1 s late, so gestures land after the cue time: judge a label window as cue to cue + 1.5 s rather than cue +- 0.6 s, or retime the labels to the measured gesture times.
 
 ## Camera dark after a crash? `--reset-camera`
 

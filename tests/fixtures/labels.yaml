@@ -1,0 +1,43 @@
+# Gesture labels for the recorded clips (Phase 4). This is the ONLY file under tests/fixtures/ that is committed;
+# the clips themselves are local-only (recordings/ or tests/fixtures/, both gitignored). Written by
+# `python -m incanto --record-guided <plan>`.
+# t = seconds from the clip's first video frame to the cue beep; a detection counts if it lands within
+# t +- tolerance_s. no_gesture_segments are talk-with-your-hands stretches in which nothing may fire.
+clips:
+  guided-20261116-175501:
+    dropped_frames: 0
+    frames: 8922
+    gestures:
+    - {gesture: snap, t: 8.067, tolerance_s: 0.6}
+    - {gesture: snap, t: 12.691, tolerance_s: 0.6}
+    - {gesture: snap, t: 17.01, tolerance_s: 0.6}
+    - {gesture: snap, t: 22.29, tolerance_s: 0.6}
+    - {gesture: snap, t: 26.435, tolerance_s: 0.6}
+    - {gesture: snap, t: 31.505, tolerance_s: 0.6}
+    - {gesture: snap, t: 36.258, tolerance_s: 0.6}
+    - {gesture: snap, t: 40.385, tolerance_s: 0.6}
+    - {gesture: snap, t: 45.394, tolerance_s: 0.6}
+    - {gesture: snap, t: 49.474, tolerance_s: 0.6}
+    - {gesture: clap, t: 62.645, tolerance_s: 0.6}
+    - {gesture: clap, t: 67.518, tolerance_s: 0.6}
+    - {gesture: clap, t: 71.65, tolerance_s: 0.6}
+    - {gesture: clap, t: 75.861, tolerance_s: 0.6}
+    - {gesture: clap, t: 80.693, tolerance_s: 0.6}
+    - {gesture: clap, t: 86.34, tolerance_s: 0.6}
+    - {gesture: clap, t: 90.626, tolerance_s: 0.6}
+    - {gesture: clap, t: 95.026, tolerance_s: 0.6}
+    - {gesture: clap, t: 100.311, tolerance_s: 0.6}
+    - {gesture: clap, t: 106.189, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 119.41, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 124.547, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 129.364, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 135.296, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 139.379, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 145.123, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 149.68, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 154.001, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 158.21, tolerance_s: 0.6}
+    - {gesture: thumbs_up, t: 162.817, tolerance_s: 0.6}
+    no_gesture_segments:
+    - {end: 296.006, start: 176.006}
+    plan: fixture-v1

@@ -1,0 +1,8 @@
+Pre-commit hook check (staged with git add -f, never committed): the hook must refuse audio, video and render files.
+pre-commit: REFUSED. Image/video/audio/array files must never be committed
+(this repo is public; screenshots, recordings and plates are local-only):
+    recordings/_hooktest_audio.wav
+    recordings/_hooktest_render.mp4
+    recordings/_hooktest_video.avi
+Unstage them with: git restore --staged <file>
+hook exit code: 1
