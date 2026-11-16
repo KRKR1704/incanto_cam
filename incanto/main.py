@@ -626,8 +626,8 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                 timer.add("preview", time.perf_counter() - t_preview)
 
             if guided_done and recorder is not None and recorder.active:
-                time.sleep(0.8)  # let the closing beep finish
-                summary = recorder.stop()
+                summary = recorder.stop()  # stop first: audio and video end together (no silent tail)
+                time.sleep(0.8)            # then let the closing beep finish
                 gestures, talks = guided.label_entries(summary.first_frame_time)
                 write_labels(LABELS_PATH, summary.path.name, gestures, talks,
                              {"plan": plan.name, "frames": summary.frames, "dropped_frames": summary.dropped})

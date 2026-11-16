@@ -81,6 +81,51 @@ def contact_time(times: np.ndarray, dist: np.ndarray, contact_dist: float = 0.04
     return float(times[i]), "closest frame"
 
 
+def motion_bracket(times: np.ndarray, energy: np.ndarray, spike: float, lead_s: float = 0.4, lag_s: float = 0.15,
+                   dup_eps: float = 0.05, high_frac: float = 0.5) -> tuple[float, float] | None:
+    """Bracket the moment of a clap in the video from how much of the picture changes between frames.
+
+    `energy[i]` is the percentage of pixels that changed between frame i-1 and i (NaN for the first frame). Hands
+    move fast right up to the contact and almost stop after it, so around the sound the energy peaks and then falls.
+    Frames the camera merely repeated (energy ~ 0) carry no information and are skipped. Returns (tl, tf): the stamped
+    time of the last frame that still shows the fast approach (>= `high_frac` of the peak) and of the first frame that
+    shows the hands stopped. The contact, in the video's own timestamps, lies in [tl, tf]. This needs no hand
+    tracking, which loses the hands for 150-350 ms around a clap."""
+    times, energy = np.asarray(times, float), np.asarray(energy, float)
+    new = np.flatnonzero(np.isfinite(energy) & (energy > dup_eps))
+    near = new[(times[new] >= spike - lead_s) & (times[new] <= spike + lag_s)]
+    if len(near) == 0:
+        return None
+    peak_i = int(near[np.argmax(energy[near])])
+    peak = energy[peak_i]
+    after = new[new > peak_i]
+    stopped = [i for i in after if energy[i] < high_frac * peak]
+    if not stopped:
+        return None
+    tf = stopped[0]
+    before = new[new < tf]
+    if len(before) == 0:
+        return None
+    return float(times[before[-1]]), float(times[tf])
+
+
+def summarize_brackets(brackets_ms: list[tuple[float, float]]) -> dict:
+    """Offset intervals (low, high) in ms, one per clap: offset = audio time - video time, and the video contact lies
+    in the bracket, so offset is in [spike - tf, spike - tl]. Reports the midpoints' median, how many intervals contain
+    that median, and the intersection of all intervals (non-empty = one constant offset explains every clap)."""
+    if not brackets_ms:
+        return {"n": 0}
+    lo = np.array([b[0] for b in brackets_ms])
+    hi = np.array([b[1] for b in brackets_ms])
+    mid = (lo + hi) / 2
+    med = float(np.median(mid))
+    inter = (float(lo.max()), float(hi.min()))
+    return {"n": len(mid), "median_ms": med, "mean_ms": float(mid.mean()), "mad_ms": float(np.median(np.abs(mid - med))),
+            "std_ms": float(mid.std()), "contain_median": int(((lo <= med) & (med <= hi)).sum()),
+            "intersection_ms": inter if inter[0] <= inter[1] else None,
+            "within_one_frame": abs(med) <= 1000 * FRAME_S, "suggested_audio_offset_ms": -med}
+
+
 def summarize(offsets_ms: list[float]) -> dict:
     """Median, spread (median absolute deviation), and whether the median is within one frame."""
     a = np.asarray(offsets_ms, float)

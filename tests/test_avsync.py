@@ -74,3 +74,51 @@ def test_summary_reports_median_spread_and_the_suggested_offset():
     assert s["mad_ms"] == 5.0
     ok = summarize([5.0, -10.0, 12.0])
     assert ok["within_one_frame"] and summarize([])["n"] == 0
+
+
+# -- motion bracket ------------------------------------------------------------------------------
+from incanto.utils.avsync import motion_bracket, summarize_brackets  # noqa: E402
+
+
+def energy_series(spike, new_times, energies, repeats=True):
+    """Frame times (30 fps stamps) and energies: the camera updates at ~15 fps and repeats every other frame."""
+    times = np.arange(spike - 0.9, spike + 0.5, 1 / 30)
+    e = np.zeros(len(times))
+    for nt, en in zip(new_times, energies):
+        e[int(np.argmin(np.abs(times - nt)))] = en
+    e[0] = np.nan
+    return times, e
+
+
+def test_bracket_is_the_last_fast_frame_and_the_first_stopped_frame():
+    # the camera shows a new picture every ~66 ms: approach 5, 9, 14 (peak), 10 percent, then the hands stop: 2
+    spike = 100.0
+    times, e = energy_series(spike, [spike - 0.2, spike - 0.133, spike - 0.066, spike + 0.0, spike + 0.066],
+                             [5, 9, 14, 10, 2])
+    tl, tf = motion_bracket(times, e, spike)
+    assert tl == pytest.approx(spike, abs=0.017) and tf == pytest.approx(spike + 0.066, abs=0.017)
+    # a clap whose stop frame comes before the sound: the bracket lies before it
+    times, e = energy_series(spike, [spike - 0.2, spike - 0.133, spike - 0.066], [5, 14, 2])
+    tl, tf = motion_bracket(times, e, spike)
+    assert tf == pytest.approx(spike - 0.066, abs=0.017) and tl == pytest.approx(spike - 0.133, abs=0.017)
+
+
+def test_bracket_ignores_repeated_frames_and_returns_none_without_a_stop():
+    times = np.arange(99.1, 100.5, 1 / 30)
+    e = np.full(len(times), np.nan)
+    e[1:] = 0.0                                              # a still picture: nothing but repeats
+    assert motion_bracket(times, e, 100.0) is None
+    e[10] = 9.0                                              # a peak with nothing after it that is lower
+    e[11:] = 20.0
+    assert motion_bracket(times, e, 100.0) is None
+
+
+def test_bracket_summary_intersection_and_median():
+    # three claps whose true offset is -20 ms, each seen through a 66 ms bracket
+    br = [(-20 - 40, -20 + 26), (-20 - 10, -20 + 56), (-20 - 60, -20 + 6)]
+    s = summarize_brackets(br)
+    assert s["median_ms"] == pytest.approx(-23.0, abs=4) and s["intersection_ms"] is not None
+    lo, hi = s["intersection_ms"]
+    assert lo <= -20 <= hi and s["within_one_frame"] and s["contain_median"] == 3
+    inconsistent = summarize_brackets([(-100, -50), (50, 100)])
+    assert inconsistent["intersection_ms"] is None and not inconsistent["within_one_frame"] or inconsistent["n"] == 2

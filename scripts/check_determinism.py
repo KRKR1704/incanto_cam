@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 
 from incanto.config import load_config  # noqa: E402
@@ -56,12 +57,17 @@ def main() -> int:
     mask_diff_px = mask_total_px = 0
     hand_mismatch = frames_with_hands = lm_nonzero = mask_nonzero = 0
     last_ms, t_start = -1, time.perf_counter()
+    prev_gray, repeats = None, 0   # frames the camera repeated (identical picture to the one before)
     for i, t, frame in clip.frames():
         if i >= n:
             break
         ms = max(int(round((t - clip.first_time) * 1000)), last_ms + 1)  # what ReplaySource.timestamp_ms() gives
         last_ms = ms
         small = downscale(frame, cfg.video.perception_width)
+        gray = cv2.cvtColor(cv2.resize(frame, (320, 180), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+        if prev_gray is not None and float(cv2.absdiff(gray, prev_gray).mean()) < 0.02:
+            repeats += 1
+        prev_gray = gray
         ha, hb = tr_a.detect(small, ms), tr_b.detect(small, ms)
         sg_a.segment(small, ms)
         sg_b.segment(small, ms)
@@ -85,6 +91,8 @@ def main() -> int:
     lines = [f"Determinism check: {clip.path}",
              f"{n} frames replayed twice with independent hand trackers and segmenters, in {time.perf_counter() - t_start:.0f} s "
              f"(timestamps from the recorded frame times; hands synchronous)",
+             f"camera: {repeats} of {n} frames ({100.0 * repeats / max(n, 1):.0f}%) show the same picture as the frame before "
+             f"(the driver repeating a frame: the picture updates at about {30.0 * (1 - repeats / max(n, 1)):.0f} fps)",
              f"hands: present on {frames_with_hands} frames | frames where count/handedness differ between runs: {hand_mismatch} | "
              f"max landmark difference {max_lm:.3g} (normalised units; 1.0 = frame width) | frames with any landmark difference: {lm_nonzero}",
              f"mask: max per-pixel difference {max_mask:.3g} (0..1) | frames with any difference: {mask_nonzero} | "

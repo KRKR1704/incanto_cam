@@ -88,17 +88,25 @@ class Clip:
                 self._audio = np.frombuffer(raw, "<i2").astype(np.float32) / 32767.0
         return self._audio
 
-    def frames(self):
-        """Yield (index, capture time, BGR frame) in order."""
+    def frames(self, first: int = 0, last: int | None = None):
+        """Yield (index, capture time, BGR frame) in order, for frames first..last-1 (default: all). Seeking to
+        `first` is exact for the lossless codec and for MJPG (every frame is a key frame)."""
+        last = self.n_frames if last is None else min(last, self.n_frames)
         cap = cv2.VideoCapture(str(self.path / VIDEO_FILE))
         try:
-            for i, t in enumerate(self.frame_times):
+            if first > 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, first)
+            for i in range(first, last):
                 ok, frame = cap.read()
                 if not ok:
                     raise ClipError(f"{self.path}: video ends at frame {i} but the sidecar lists {self.n_frames}")
-                yield i, float(t), frame
+                yield i, float(self.frame_times[i]), frame
         finally:
             cap.release()
+
+    def index_at(self, t: float) -> int:
+        """Index of the first frame captured at or after time t (clamped)."""
+        return int(min(max(np.searchsorted(self.frame_times, t), 0), self.n_frames - 1))
 
 
 class ReplaySource:
