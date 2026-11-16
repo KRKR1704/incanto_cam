@@ -155,11 +155,19 @@ class VanishMask:
         mask and hand hulls, plus a margin), replacing the running estimate. If too little background is
         visible the previous estimate stays. Used by the freeze style when vanish turns on, and for the
         fresh match just before reappearing."""
+        self.estimate_snapshot(small, seg_small, hands)
+        return self.apply_matched()
+
+    def estimate_snapshot(self, small: np.ndarray, seg_small: np.ndarray, hands: list[Hand]) -> None:
+        """First half of snapshot_matched (about 5 ms): the unsmoothed gain estimate from this frame."""
         had = self._have_match
         self._have_match = False  # the first estimate is taken fully (no smoothing)
         self._estimate_match(small, self._covered(seg_small, hands))
         self._have_match = self._have_match or had
         self._matched_small = self._matched_full = None  # running composites rebuild from the new estimate
+
+    def apply_matched(self) -> np.ndarray:
+        """Second half (about 5 ms): the full-resolution plate with the current estimate applied (uint8)."""
         return self._apply(self._plate_u8)
 
     def _apply(self, plate: np.ndarray, roi: tuple[int, int, int, int] | None = None) -> np.ndarray:

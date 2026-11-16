@@ -102,6 +102,7 @@ class VanishConfig:
     region_margin_px: int = 120          # region: every mask source ever seen this session, grown by this much (at 1280 wide)
     region_feather_px: int = 60          # region: soft edge outside that, so there is no visible outline
     transition_s: float = 0.4            # V on/off crossfades over this long (time-based, uses dt); 0 = hard cut
+    reappear_fade_s: float = 1.0         # freeze: the fade back to live takes this long if the room fails the structure check
     grain_scale: float = 1.0             # synthetic camera grain on frozen plate pixels, x the captured noise; 0 = off
 
 
@@ -274,8 +275,8 @@ def load_config(path: str | Path | None = None) -> Config:
         raise ConfigError(f"vanish.style must be one of {VANISH_STYLES}, got '{vanish.style}'")
     if vanish.region_margin_px < 0 or vanish.region_feather_px < 0:
         raise ConfigError("vanish.region_margin_px and vanish.region_feather_px must be >= 0")
-    if vanish.transition_s < 0:
-        raise ConfigError("vanish.transition_s must be >= 0 (0 = hard cut)")
+    if vanish.transition_s < 0 or vanish.reappear_fade_s < 0:
+        raise ConfigError("vanish.transition_s and vanish.reappear_fade_s must be >= 0 (0 = hard cut)")
     if not 0 <= vanish.grain_scale <= 4:
         raise ConfigError("vanish.grain_scale must be between 0 (off) and 4")
     if vanish.plate_match not in PLATE_MATCH_MODES:

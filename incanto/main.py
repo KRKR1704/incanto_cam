@@ -483,6 +483,20 @@ def run(config_path: str | None, max_seconds: float | None, show_preview: bool,
                     elif vanish_on:
                         vanish_on = False
                         log.info("Vanish OFF")
+                        if styler.style == "freeze" and segmenter.small is not None:
+                            # reappear safety: was the room changed while the frozen picture hid it?
+                            with timer.stage("health"):
+                                end = vmask.check_health(small, segmenter.small, hand_list, limits)
+                            if end is not None and end.structure is not None and end.structure < limits.min_structure:
+                                log.warning("Reappearing, but the room no longer matches the plate (structure %.2f below "
+                                            "%.2f: something was moved while you were invisible?). Fading back over %.1fs "
+                                            "instead of %.1fs. Press B for a new plate. (%s)", end.structure,
+                                            limits.min_structure, cfg.vanish.reappear_fade_s, cfg.vanish.transition_s,
+                                            end.describe())
+                                styler.slow_exit(cfg.vanish.reappear_fade_s)
+                            elif end is not None:
+                                log.info("Reappearing: room still matches the plate (structure %s)",
+                                         "n/a" if end.structure is None else f"{end.structure:.2f}")
                     else:
                         want_vanish = True  # granted on the next frame if the plate passes the health check
                 if key in (ord("g"), ord("G")):

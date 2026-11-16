@@ -75,6 +75,8 @@ vanish:                        # the mask used when V replaces you with the plat
   region_margin_px: 120        # region style: grow the accumulated mask sources by this (px at 1280 wide)
   region_feather_px: 60        # region style: soft edge outside that
   transition_s: 0.4            # V on/off crossfade (freeze and region; live cuts), time-based; 0 = hard cut
+  reappear_fade_s: 1.0         # freeze: when V turns vanish off and the room no longer passes the structure check
+                               # (furniture moved while you were invisible), log a warning and fade back this slowly
   grain_scale: 1.0             # synthetic grain on plate pixels, x the noise measured at plate capture; 0 = off
 
 plate:                         # clean plate of the empty room (plates/ is local-only, gitignored)

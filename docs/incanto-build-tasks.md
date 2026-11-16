@@ -20,7 +20,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 0 | Setup | 7 | 0.5 h | ☑ |
 | 1 | Camera pipeline | 7 | 1.5 h | ☑ |
 | 2 | Perception | 9 | 2.5 h | ☑ |
-| 3 | Clean plate | 8 | 1 h | ☐ |
+| 3 | Clean plate | 9 | 1 h | ☑ |
 | 4 | Record & replay | 7 | 1.5 h | ☐ |
 | 5 | Gesture engine | 11 | 4 h | ☐ |
 | 6 | Vanish spell | 11 | 4 h | ☐ |
@@ -96,6 +96,8 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 
 **Phase gate:** Pressing `V` makes you disappear with no visible hole or ghosting, live in Meet. Save before/after screenshots (local-only).
 
+**Gate passed (freeze style, live run):** vanished at 29-30 FPS, matched residual about 1.2-1.4, the capture person check aborted correctly twice while moving and passed at 0.0% coverage. Log: `docs/evidence/phase-3/run-log-styles.txt` (earlier runs: `run-log-full-v2.txt`, `run-log-v3.txt`, `run-log-v4.txt`). Screenshots stay local-only. `region` and `live` styles exist as options but were not live-tested.
+
 ---
 
 ## Phase 4: Record & replay
@@ -153,6 +155,8 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 6.11 | Mask fingertip gaps: dilate the mask slightly and union it with a convex hull from the hand landmarks before vanish compositing (the 144x256 segmentation model misses thin fingertips; seen in Phase 2 screenshots) | 6.5, 2.5 | 30m | [x] (done early in 3.8) |
 
 **Note (from the Phase 3 live test):** dust particles must use a strict person-only mask (the raw segmenter, with no dilation and no plate difference), so background objects (such as the chair behind you) do not dissolve. The vanish mask is deliberately larger than you; it must not drive the particles.
+
+**Note (Phase 3 vanish styles):** Dissolve uses the strict person mask during the animation, then hands off to freeze; reassemble uses the reverse.
 
 **Phase gate:** A screen recording **inside a Meet call** of the full cycle: snap → dissolve → invisible while moving → snap → reassemble, with FPS ≥ 24 throughout (log excerpt). The screen recording is local-only; commit only the log excerpt.
 

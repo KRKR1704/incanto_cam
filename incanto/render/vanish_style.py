@@ -36,6 +36,8 @@ from incanto.render.vanish_mask import MATCH_STRIDE, REFERENCE_WIDTH, VanishMask
 log = logging.getLogger(__name__)
 
 ALPHA_EPS = 0.003  # region alpha below this counts as zero
+PREP_EVERY_S = 1.0   # freeze: while vanish is off, a fresh gain match + grain amplitudes are prepared this often...
+PREP_MAX_AGE_S = 3.0  # ...and used for V if no older than this (otherwise V computes them on the spot)
 
 
 class CrossFade:
@@ -44,13 +46,15 @@ class CrossFade:
 
     def __init__(self, duration_s: float):
         self.duration_s = duration_s
+        self.out_duration_s: float | None = None  # a one-off different duration for fading out
         self.alpha = 0.0
 
     def step(self, target_on: bool, dt: float) -> float:
-        if self.duration_s <= 0:
+        duration = self.duration_s if target_on or self.out_duration_s is None else self.out_duration_s
+        if duration <= 0:
             self.alpha = 1.0 if target_on else 0.0
         else:
-            delta = max(dt, 0.0) / self.duration_s
+            delta = max(dt, 0.0) / duration
             self.alpha = min(1.0, self.alpha + delta) if target_on else max(0.0, self.alpha - delta)
         return self.alpha
 
@@ -155,6 +159,10 @@ class VanishStyler:
         self._amp: np.ndarray | None = None       # int16 grain amplitudes for the current frozen/region plate
         self._base: np.ndarray | None = None      # freeze: the gain-matched plate, held fixed
         self._fresh: np.ndarray | None = None     # freeze: the plate re-matched to the live frame for the way back
+        self._ready: tuple | None = None          # freeze: (base, amp) prepared ahead while vanish is off
+        self._ready_age = 0.0
+        self._prep_stage, self._prep_clock, self._prep_base = 0, 0.0, None
+        self._fresh_pending = False               # freeze: the re-match for the way back is half done
         self._engaged = False                     # vanish is on (as far as the styler has seen)
         self._need_begin = False                  # the style changed mid-session: set it up on the next frame
         self._warned_no_noise = False
@@ -174,6 +182,7 @@ class VanishStyler:
             return
         self.style = style
         self._base = self._fresh = self._amp = None
+        self._drop_prep()
         self._need_begin = True
         self.region.reset()  # a region belongs to one session of one style
         if style == "live":
@@ -185,7 +194,16 @@ class VanishStyler:
         self.set_style(VANISH_STYLES[(VANISH_STYLES.index(self.style) + 1) % len(VANISH_STYLES)])
         return self.style
 
+    def _drop_prep(self) -> None:
+        self._ready, self._prep_stage, self._prep_clock, self._prep_base = None, 0, 0.0, None
+        self._fresh_pending = False
+
+    def slow_exit(self, seconds: float) -> None:
+        """The next fade-out (V off) takes `seconds` instead of transition_s (the room changed under the plate)."""
+        self.fade.out_duration_s = seconds
+
     def _release(self) -> None:
+        self._drop_prep()
         self._base = self._fresh = self._amp = None
         self._engaged = False
         self._need_begin = False
@@ -211,11 +229,17 @@ class VanishStyler:
 
         if want_on and not self._engaged:
             self._engaged, self._need_begin = True, True
+            self.fade.out_duration_s = None
+            self._fresh_pending = False
         elif not want_on and self._engaged:
             self._engaged = False
             if self.style == "freeze" and self._base is not None:
-                with stage("vs_rematch"):  # a fresh gain match for the way back
-                    self._fresh = self.vmask.snapshot_matched(small, seg_small, hands)
+                with stage("vs_rematch"):  # a fresh gain match for the way back, in two frames (5 ms each)
+                    self.vmask.estimate_snapshot(small, seg_small, hands)
+                self._fresh_pending = True
+        elif self._fresh_pending and self.style == "freeze" and self._base is not None:
+            with stage("vs_rematch"):
+                self._fresh, self._fresh_pending = self.vmask.apply_matched(), False
         if self._need_begin and self._engaged:
             self._need_begin = False
             with stage("vs_begin"):
@@ -227,8 +251,13 @@ class VanishStyler:
             alpha = self.fade.step(self._engaged, dt)
         if alpha <= 0.0 and not self._engaged:
             self._base = self._fresh = self._amp = None  # fade finished: let go of the frozen picture
+            self._fresh_pending = False
+            self.fade.out_duration_s = None
             if self.style == "region":
                 self.region.reset()
+            elif self.style == "freeze" and self._plate_u8 is not None:
+                with stage("vs_prep"):
+                    self._prepare(small, seg_small, hands, dt)  # ready for the next V, a few ms per frame
             return frame, None
 
         if self.style == "freeze":
@@ -241,17 +270,38 @@ class VanishStyler:
         """Set the current style up (vanish just turned on, or the style changed while it is on)."""
         vm = self.vmask
         if self.style == "freeze":
-            if self._base is not None and self._fresh is not None and self.fade.alpha > 0:
+            if self._base is not None and self.fade.alpha > 0:
                 self._base = self._frozen_layer(self.fade.alpha)  # turned on again mid fade-out: keep what is shown
+                self._fresh = None
+                self._fresh_pending = False
+                return
+            if self._ready is not None and self._ready_age <= PREP_MAX_AGE_S:
+                self._base, self._amp = self._ready  # matched a moment ago while vanish was off: no work now
             else:
-                self._base = vm.snapshot_matched(small, seg_small, hands)  # gain map against the live frame, once
+                self._base = vm.snapshot_matched(small, seg_small, hands)  # gain map against the live frame
+                self._amp = self._amplitudes(self._base)
+            self._ready = None
             self._fresh = None
-            self._amp = self._amplitudes(self._base)
         elif self.style == "region":
             if self.fade.alpha <= 0:
                 self.region.reset()
             vm.reset_temporal()
             self._amp = self._amplitudes(vm.matched_plate_full())
+
+    def _prepare(self, small, seg_small, hands, dt: float) -> None:
+        """Keep a recent gain-matched plate and its grain amplitudes ready, one cheap step per frame
+        (estimate 5 ms, apply 5 ms, amplitudes 5 ms) once a second, so V never stalls a frame."""
+        self._ready_age += max(dt, 0.0)
+        self._prep_clock += max(dt, 0.0)
+        if self._prep_stage == 0:
+            if self._prep_clock >= PREP_EVERY_S:
+                self.vmask.estimate_snapshot(small, seg_small, hands)
+                self._prep_stage = 1
+        elif self._prep_stage == 1:
+            self._prep_base, self._prep_stage = self.vmask.apply_matched(), 2
+        else:
+            self._ready = (self._prep_base, self._amplitudes(self._prep_base))
+            self._ready_age, self._prep_clock, self._prep_stage, self._prep_base = 0.0, 0.0, 0, None
 
     def _amplitudes(self, matched: np.ndarray) -> np.ndarray | None:
         scale = self.cfg.grain_scale

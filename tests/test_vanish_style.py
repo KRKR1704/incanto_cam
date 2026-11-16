@@ -212,6 +212,8 @@ def test_freeze_fades_in_and_out_by_dt_and_rematches_before_reappearing():
     held = st._base.copy()
     out, _ = st.render(dim, dim, seg, [], False, 0.1)      # fade-out starts
     assert st.fade.alpha == pytest.approx(0.75)
+    assert st._fresh is None                               # the re-match is spread over two frames
+    st.render(dim, dim, seg, [], False, 0.01)
     assert st._fresh is not None
     bg = (slice(0, 60), slice(0, W))
     assert st._fresh[bg].astype(np.float32).mean() == pytest.approx(plate.u8[bg].astype(np.float32).mean() * 0.8, rel=0.03)
@@ -230,6 +232,7 @@ def test_turning_on_again_mid_fade_keeps_what_is_shown():
     st.render(live, live, seg, [], True, 1.0)
     dim = live_frame(plate.u8, 0.8)
     st.render(dim, dim, seg, [], False, 0.2)               # halfway out
+    st.render(dim, dim, seg, [], False, 0.0)               # (the re-match finishes)
     shown = st._frozen_layer(0.5).copy()
     st.render(dim, dim, seg, [], True, 0.0)                # V again
     assert np.array_equal(st._base, shown) and st._fresh is None
@@ -341,3 +344,75 @@ def test_config_validation(tmp_path):
     assert cfg.vanish.style == "region" and cfg.vanish.grain_scale == 0
     assert VanishConfig().style == "freeze" and VanishConfig().transition_s == 0.4
     assert VanishConfig().region_margin_px == 120 and VanishConfig().region_feather_px == 60
+
+
+def test_slow_exit_uses_the_longer_fade_once():
+    f = CrossFade(0.4)
+    f.step(True, 1.0)
+    f.out_duration_s = 1.0
+    assert f.step(False, 0.2) == pytest.approx(0.8)        # 1.0 s fade-out
+    assert f.step(True, 0.04) == pytest.approx(0.9)        # fading in still uses transition_s (0.04 / 0.4)
+
+
+def test_styler_slow_exit_then_normal_next_time():
+    plate = plate_with_noise(2.0)
+    st, vm = styler("freeze", transition_s=0.4, grain_scale=0.0)
+    start(st, vm, plate)
+    live = live_frame(plate.u8, 1.0)
+    seg = seg_box(200, 400)
+    st.render(live, live, seg, [], True, 1.0)
+    st.slow_exit(1.0)
+    st.render(live, live, seg, [], False, 0.2)
+    assert st.fade.alpha == pytest.approx(0.8)
+    st.render(live, live, seg, [], False, 2.0)             # fully out
+    st.render(live, live, seg, [], True, 1.0)              # on again: the override is gone
+    st.render(live, live, seg, [], False, 0.2)
+    assert st.fade.alpha == pytest.approx(0.5)
+
+
+def test_vanish_on_has_no_stall_because_the_match_was_prepared_while_off(monkeypatch):
+    plate = plate_with_noise(2.0)
+    st, vm = styler("freeze", transition_s=0.4)
+    start(st, vm, plate)
+    live = live_frame(plate.u8, 1.1)
+    seg = seg_box(200, 400)
+    for _ in range(45):                                    # ~1.5 s of vanish off: prep runs in the background
+        st.render(live, live, seg, [], False, 1 / 30)
+    assert st._ready is not None
+    calls = []
+    orig = vm.snapshot_matched
+    monkeypatch.setattr(vm, "snapshot_matched", lambda *a: calls.append(1) or orig(*a))
+    st.render(live, live, seg, [], True, 1 / 30)
+    assert not calls                                       # V used the ready one: no gain match on this frame
+    bg = (slice(0, 60), slice(0, W))
+    assert st._base[bg].astype(np.float32).mean() == pytest.approx(plate.u8[bg].astype(np.float32).mean() * 1.1, rel=0.03)
+    assert st._amp is not None
+
+
+def test_stale_prepared_match_is_not_used(monkeypatch):
+    plate = plate_with_noise(2.0)
+    st, vm = styler("freeze", transition_s=0.4)
+    start(st, vm, plate)
+    live = live_frame(plate.u8, 1.0)
+    seg = seg_box(200, 400)
+    for _ in range(45):
+        st.render(live, live, seg, [], False, 1 / 30)
+    st._ready_age = 10.0
+    calls = []
+    orig = vm.snapshot_matched
+    monkeypatch.setattr(vm, "snapshot_matched", lambda *a: calls.append(1) or orig(*a))
+    st.render(live, live, seg, [], True, 1 / 30)
+    assert calls                                           # too old: computed on the spot
+
+
+def test_prep_work_is_spread_over_frames():
+    plate = plate_with_noise(2.0)
+    st, vm = styler("freeze", transition_s=0.4)
+    start(st, vm, plate)
+    live = live_frame(plate.u8, 1.0)
+    seg = seg_box(200, 400)
+    stages = []
+    for _ in range(40):
+        st.render(live, live, seg, [], False, 1 / 30)
+        stages.append(st._prep_stage)
+    assert max(stages) == 2 and stages.count(1) == 1 and stages.count(2) == 1   # one step per frame

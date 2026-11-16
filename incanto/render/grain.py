@@ -23,6 +23,7 @@ AMP_MAX = 1023        # amplitude cap = 16 levels of std
 BANKS = 4
 PAD = 64              # banks are this much larger than the frame; each frame takes a random crop
 RATIO_LIMITS = (0.25, 4.0)  # how far the luma curve may rescale the stored std
+AMP_SCALE = 4         # amplitudes are worked out at 1/4 size and enlarged: the stored std is smooth anyway
 
 
 class GrainProfile:
@@ -32,9 +33,15 @@ class GrainProfile:
         if std.shape != plate_u8.shape:
             raise ValueError(f"noise profile {std.shape} does not match the plate {plate_u8.shape}")
         self.std = std.astype(np.float32)
-        self._plate_luma = cv2.cvtColor(plate_u8, cv2.COLOR_BGR2GRAY)
+        plate_luma = cv2.cvtColor(plate_u8, cv2.COLOR_BGR2GRAY)
+        h, w = plate_u8.shape[:2]
+        self._full = (w, h)
+        self._q = (max(1, w // AMP_SCALE), max(1, h // AMP_SCALE))
+        self._std_q = cv2.resize(self.std, self._q, interpolation=cv2.INTER_AREA)
+        self._plate_luma_q = cv2.cvtColor(cv2.resize(plate_u8, self._q, interpolation=cv2.INTER_AREA),
+                                          cv2.COLOR_BGR2GRAY)
         mean_std = self.std.mean(axis=2)
-        luma = self._plate_luma.ravel()
+        luma = plate_luma.ravel()
         total = np.bincount(luma, weights=mean_std.ravel(), minlength=256)
         count = np.bincount(luma, minlength=256).astype(np.float64)
         known = count > 0
@@ -47,11 +54,12 @@ class GrainProfile:
         self.curve = np.maximum(curve, 0.05).astype(np.float32)
 
     def amplitude(self, matched_u8: np.ndarray, scale: float = 1.0) -> np.ndarray:
-        """int16 HxWx3 amplitudes (std * AMP_UNIT) for the pixels of `matched_u8`, the gain-matched plate."""
-        luma = cv2.cvtColor(matched_u8, cv2.COLOR_BGR2GRAY)
-        ratio = np.clip(self.curve[luma] / self.curve[self._plate_luma], *RATIO_LIMITS)
-        amp = self.std * ratio[..., None] * (scale * AMP_UNIT)
-        return np.clip(amp, 0, AMP_MAX).astype(np.int16)
+        """int16 HxWx3 amplitudes (std * AMP_UNIT) for the pixels of `matched_u8`, the gain-matched plate.
+        Worked out at 1/AMP_SCALE size (about 5 ms instead of 35 ms at 1280x720) and enlarged."""
+        luma = cv2.cvtColor(cv2.resize(matched_u8, self._q, interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+        ratio = np.clip(self.curve[luma] / self.curve[self._plate_luma_q], *RATIO_LIMITS)
+        amp = np.clip(self._std_q * ratio[..., None] * (scale * AMP_UNIT), 0, AMP_MAX).astype(np.int16)
+        return cv2.resize(amp, self._full, interpolation=cv2.INTER_LINEAR)
 
     @staticmethod
     def uniform(std_levels: float, shape: tuple[int, int]) -> np.ndarray:

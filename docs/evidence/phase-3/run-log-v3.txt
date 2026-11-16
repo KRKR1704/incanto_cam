@@ -1,0 +1,137 @@
+16:19:23 INFO    incanto: System: cpu=Intel64 Family 6 Model 183 Stepping 1, GenuineIntel | power mode=Balanced (no overlay) | power=AC 100% | perf tweaks=on
+16:19:23 INFO    incanto.utils.winperf: perf tweaks: power throttling opt-out=OK, ABOVE_NORMAL priority=OK
+16:19:26 INFO    incanto.io.camera: Camera 0 opened: 1280x720 @ 30.0 fps (requested 1280x720 @ 30)
+16:19:27 INFO    incanto.io.camera: exposure: requested auto | set() accepted=True | mean brightness 103 -> 106
+16:19:27 INFO    incanto.io.vcam: Virtual camera started: OBS Virtual Camera (1280x720 @ 30 fps, backend=obs)
+16:19:27 INFO    incanto: Capture mode: threaded
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+WARNING: Logging before InitGoogle() is written to STDERR
+W0000 00:00:1794345567.860215  101004 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1794345567.869376   76544 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+W0000 00:00:1794345567.875290  108292 inference_feedback_manager.cc:121] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
+16:19:27 INFO    incanto: Loaded saved plate FROM A PREVIOUS SESSION: 1280x720, 30 frames, exposure auto, mean brightness 120.9, taken 2026-11-09T23:50:28+00:00. It must pass the health check against the room before vanish will use it; press B to capture a fresh one.
+16:19:27 INFO    incanto: Perception ready: perception_width=640, hands=2 (async thread), segment every 1 frame(s), preview every 3 frame(s)
+16:19:27 INFO    incanto: Running. Q quits, D toggles the debug HUD, B captures a clean plate, V toggles vanish (applied to the vcam output too; B/V/D/S/Q are read from the preview window). mask_mode=full
+16:19:27 WARNING incanto: Plate health (plate from a previous session): raw diff +23.6 | gain BGR 1.22/1.20/1.18 | max cell gain 2.32 | background 53% | FAILED: raw diff +23.6 beyond +/-20; cell gain 2.32 above 1.5
+W0000 00:00:1794345567.959529   90432 landmark_projection_calculator.cc:81] Using NORM_RECT without IMAGE_DIMENSIONS is only supported for the square ROI. Provide IMAGE_DIMENSIONS or use PROJECTION_MATRIX.
+16:19:32 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 30.3 fps | grab=23.2ms retrieve=9.8ms wait_frame=17.9ms downscale=0.2ms segment=8.9ms health=3.1ms vcam=4.2ms hands_age=50.5ms preview=5.0ms hands=16.1ms | cpu=204% (of one core)
+16:19:32 INFO    incanto: hands worker: 29.5 Hz, inference 16.1 ms, result age 50.5 ms (at main-loop use)
+16:19:32 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:19:37 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 29.8 fps | grab=22.4ms retrieve=11.0ms wait_frame=19.5ms downscale=0.2ms hands_age=46.5ms segment=7.7ms vcam=4.0ms preview=4.1ms health=3.7ms hands=15.1ms | cpu=169% (of one core)
+16:19:37 INFO    incanto: hands worker: 29.8 Hz, inference 15.1 ms, result age 46.5 ms (at main-loop use)
+16:19:37 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:19:42 INFO    incanto.plate.clean_plate: Plate capture: leave the frame. Countdown 5s, settle 1.0s, then 30 frames.
+16:19:42 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.0ms grab=22.3ms wait_frame=20.6ms downscale=0.2ms hands_age=51.2ms segment=7.3ms vcam=3.6ms preview=3.7ms health=3.2ms hands=15.8ms | cpu=178% (of one core)
+16:19:42 INFO    incanto: hands worker: 30.0 Hz, inference 15.8 ms, result age 51.2 ms (at main-loop use)
+16:19:42 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:19:48 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=10.9ms grab=22.4ms wait_frame=20.6ms downscale=0.2ms hands_age=50.2ms segment=7.3ms vcam=3.8ms preview=3.6ms hands=15.0ms | cpu=187% (of one core)
+16:19:48 INFO    incanto: hands worker: 30.0 Hz, inference 15.0 ms, result age 50.2 ms (at main-loop use)
+16:19:48 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:19:48 INFO    incanto.plate.clean_plate: Plate capture: capturing 30 frames now.
+16:19:49 INFO    incanto: Plate captured and saved (local-only): D:\incanto\code\plates\plate.png | 30 frames | mean brightness 124.4 | exposure auto | peak person coverage 0.09%
+16:19:49 INFO    incanto: Plate health: raw diff -0.0 | gain BGR 1.00/1.00/1.00 | max cell gain 1.01 | background 100% | healthy
+16:19:53 INFO    incanto: FPS 29.7 (avg over 5.0s) | camera delivers 30.3 fps | retrieve=11.2ms grab=22.0ms wait_frame=19.4ms downscale=0.2ms hands_age=43.4ms segment=7.3ms vcam=3.8ms preview=3.8ms health=2.4ms hands=14.6ms | cpu=174% (of one core)
+16:19:53 INFO    incanto: hands worker: 29.9 Hz, inference 14.6 ms, result age 43.4 ms (at main-loop use)
+16:19:53 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:19:58 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | grab=22.5ms retrieve=10.8ms wait_frame=20.8ms downscale=0.2ms hands_age=49.0ms segment=7.0ms vcam=3.7ms preview=3.4ms health=2.2ms hands=14.2ms | cpu=158% (of one core)
+16:19:58 INFO    incanto: hands worker: 29.8 Hz, inference 14.2 ms, result age 49.0 ms (at main-loop use)
+16:19:58 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:03 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 29.9 fps | grab=22.2ms retrieve=11.1ms wait_frame=20.6ms downscale=0.2ms hands_age=45.4ms segment=7.1ms vcam=3.8ms preview=3.5ms health=2.5ms hands=14.1ms | cpu=178% (of one core)
+16:20:03 INFO    incanto: hands worker: 30.1 Hz, inference 14.1 ms, result age 45.4 ms (at main-loop use)
+16:20:03 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:07 WARNING incanto: Plate health: raw diff -35.7 | gain BGR 0.73/0.75/0.73 | max cell gain 1.36 | background 84% | FAILED: raw diff -35.7 beyond +/-20; gain 0.73..0.75 outside 0.8-1.25
+16:20:08 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 29.7 fps | grab=22.5ms retrieve=10.9ms wait_frame=20.0ms downscale=0.2ms hands_age=49.5ms segment=7.5ms vcam=4.0ms preview=3.7ms health=2.7ms hands=16.6ms | cpu=181% (of one core)
+16:20:08 INFO    incanto: hands worker: 29.5 Hz, inference 16.6 ms, result age 49.5 ms (at main-loop use)
+16:20:08 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:08 INFO    incanto: Plate health: raw diff -16.1 | gain BGR 0.86/0.88/0.88 | max cell gain 1.17 | background 58% | healthy
+16:20:11 INFO    incanto: Debug view: off
+16:20:12 INFO    incanto: Debug view: sources
+16:20:12 WARNING incanto: Plate health: raw diff +8.5 | gain BGR 1.06/1.06/1.07 | max cell gain 1.52 | background 62% | FAILED: cell gain 1.52 above 1.5
+16:20:13 INFO    incanto: FPS 30.1 (avg over 5.0s) | camera delivers 30.1 fps | retrieve=11.1ms grab=22.0ms wait_frame=18.3ms downscale=0.2ms hands_age=52.4ms segment=8.3ms vcam=4.1ms preview=5.3ms health=2.9ms hands=18.1ms | cpu=187% (of one core)
+16:20:13 INFO    incanto: hands worker: 29.7 Hz, inference 18.1 ms, result age 52.4 ms (at main-loop use)
+16:20:13 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:16 INFO    incanto: Debug view: leak
+16:20:16 INFO    incanto: Debug view: off
+16:20:17 INFO    incanto: Debug view: sources
+16:20:17 INFO    incanto: Debug view: leak
+16:20:18 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 29.9 fps | retrieve=10.9ms grab=22.4ms wait_frame=18.7ms downscale=0.2ms hands_age=47.9ms segment=8.3ms vcam=3.7ms health=2.4ms preview=6.0ms hands=14.4ms | cpu=164% (of one core)
+16:20:18 INFO    incanto: hands worker: 29.9 Hz, inference 14.4 ms, result age 47.9 ms (at main-loop use)
+16:20:18 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:22 WARNING incanto: Vanish refused: the plate doesn't match the room (raw diff +29.9 | gain BGR 1.22/1.21/1.21 | max cell gain 1.75 | background 58% | FAILED: raw diff +29.9 beyond +/-20; cell gain 1.75 above 1.5). Press B to capture a new plate.
+16:20:23 INFO    incanto: FPS 30.1 (avg over 5.0s) | camera delivers 30.1 fps | retrieve=11.4ms grab=22.0ms wait_frame=18.8ms downscale=0.2ms hands_age=49.6ms segment=8.1ms vcam=4.0ms preview=4.9ms health=2.4ms hands=17.8ms | cpu=190% (of one core)
+16:20:23 INFO    incanto: hands worker: 30.1 Hz, inference 17.8 ms, result age 49.6 ms (at main-loop use)
+16:20:23 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:28 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | grab=22.0ms retrieve=11.2ms wait_frame=18.8ms downscale=0.2ms hands_age=42.9ms segment=8.1ms vcam=4.2ms preview=4.7ms health=2.5ms hands=14.9ms | cpu=186% (of one core)
+16:20:28 INFO    incanto: hands worker: 30.0 Hz, inference 14.9 ms, result age 42.9 ms (at main-loop use)
+16:20:28 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:28 INFO    incanto: Debug view: off
+16:20:29 INFO    incanto: Debug view: sources
+16:20:30 INFO    incanto: Debug view: leak
+16:20:33 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.5ms grab=21.8ms wait_frame=18.8ms downscale=0.2ms hands_age=42.9ms segment=8.3ms vcam=4.0ms preview=4.7ms health=2.1ms hands=14.7ms | cpu=179% (of one core)
+16:20:33 INFO    incanto: hands worker: 30.0 Hz, inference 14.7 ms, result age 42.9 ms (at main-loop use)
+16:20:33 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:34 WARNING incanto: Vanish refused: the plate doesn't match the room (raw diff +28.8 | gain BGR 1.20/1.20/1.20 | max cell gain 1.75 | background 51% | FAILED: raw diff +28.8 beyond +/-20; cell gain 1.75 above 1.5). Press B to capture a new plate.
+16:20:38 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 30.1 fps | retrieve=10.9ms grab=22.4ms wait_frame=19.0ms downscale=0.2ms hands_age=47.4ms segment=8.2ms vcam=4.1ms preview=4.3ms health=2.7ms hands=14.9ms | cpu=195% (of one core)
+16:20:38 INFO    incanto: hands worker: 29.9 Hz, inference 14.9 ms, result age 47.4 ms (at main-loop use)
+16:20:38 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:43 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 29.7 fps | grab=21.6ms retrieve=11.7ms wait_frame=16.6ms downscale=0.2ms hands_age=60.0ms segment=9.6ms vcam=4.7ms preview=4.6ms health=4.3ms hands=23.6ms | cpu=267% (of one core)
+16:20:43 INFO    incanto: hands worker: 28.1 Hz, inference 23.6 ms, result age 60.0 ms (at main-loop use)
+16:20:43 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:48 INFO    incanto: FPS 29.8 (avg over 5.0s) | camera delivers 30.2 fps | retrieve=11.6ms grab=21.5ms wait_frame=15.9ms downscale=0.3ms hands_age=60.7ms segment=9.9ms vcam=5.1ms preview=5.1ms health=4.7ms hands=25.9ms | cpu=238% (of one core)
+16:20:48 INFO    incanto: hands worker: 27.2 Hz, inference 25.9 ms, result age 60.7 ms (at main-loop use)
+16:20:48 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:51 INFO    incanto: Plate health: raw diff +1.5 | gain BGR 1.02/1.02/0.99 | max cell gain 1.45 | background 80% | healthy
+16:20:51 WARNING incanto: Plate health: raw diff -3.8 | gain BGR 0.99/0.98/0.95 | max cell gain 1.55 | background 81% | FAILED: cell gain 1.55 above 1.5
+16:20:52 INFO    incanto.plate.clean_plate: Plate capture: leave the frame. Countdown 5s, settle 1.0s, then 30 frames.
+16:20:53 INFO    incanto: FPS 29.9 (avg over 5.0s) | camera delivers 29.9 fps | retrieve=11.6ms grab=21.8ms wait_frame=19.1ms downscale=0.2ms hands_age=47.9ms segment=8.1ms vcam=4.3ms preview=3.8ms health=2.9ms hands=15.5ms | cpu=188% (of one core)
+16:20:53 INFO    incanto: hands worker: 29.9 Hz, inference 15.5 ms, result age 47.9 ms (at main-loop use)
+16:20:53 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:58 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.0ms grab=22.2ms wait_frame=19.2ms downscale=0.2ms hands_age=48.6ms segment=7.9ms vcam=4.3ms preview=4.1ms hands=15.1ms | cpu=193% (of one core)
+16:20:58 INFO    incanto: hands worker: 30.0 Hz, inference 15.1 ms, result age 48.6 ms (at main-loop use)
+16:20:58 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:20:58 INFO    incanto.plate.clean_plate: Plate capture: capturing 30 frames now.
+16:20:58 WARNING incanto.plate.clean_plate: Plate capture aborted: Person still in frame (12.0% of pixels, 2.0% allowed). Plate NOT saved. Press B to retry.
+16:20:58 INFO    incanto: Plate health: raw diff +8.4 | gain BGR 1.06/1.06/1.06 | max cell gain 1.35 | background 81% | healthy
+16:21:03 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.1ms grab=22.2ms wait_frame=18.9ms downscale=0.2ms hands_age=48.4ms segment=8.1ms vcam=4.3ms health=2.7ms preview=4.0ms hands=15.7ms | cpu=190% (of one core)
+16:21:03 INFO    incanto: hands worker: 30.0 Hz, inference 15.7 ms, result age 48.4 ms (at main-loop use)
+16:21:03 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:21:08 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 30.0 fps | retrieve=11.2ms grab=22.0ms wait_frame=19.3ms downscale=0.2ms hands_age=48.7ms segment=7.8ms vcam=4.3ms preview=3.7ms health=2.7ms hands=15.0ms | cpu=196% (of one core)
+16:21:08 INFO    incanto: hands worker: 30.0 Hz, inference 15.0 ms, result age 48.7 ms (at main-loop use)
+16:21:08 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:21:10 WARNING incanto: Plate health: raw diff -51.1 | gain BGR 0.70/0.68/0.64 | max cell gain 1.64 | background 64% | FAILED: raw diff -51.1 beyond +/-20; gain 0.64..0.70 outside 0.8-1.25; cell gain 1.64 above 1.5
+16:21:11 INFO    incanto: Plate health: raw diff -9.4 | gain BGR 0.93/0.93/0.93 | max cell gain 1.45 | background 68% | healthy
+16:21:12 INFO    incanto: Vanish ON (plate health: raw diff +8.4 | gain BGR 1.06/1.06/1.06 | max cell gain 1.34 | background 48% | healthy)
+16:21:13 INFO    incanto: FPS 29.1 (avg over 5.0s) | camera delivers 30.1 fps | retrieve=10.9ms grab=22.4ms wait_frame=17.0ms downscale=0.2ms hands_age=54.5ms segment=8.3ms vcam=4.2ms preview=4.1ms health=3.0ms vm_seg=1.1ms vm_hands=0.3ms vm_match=4.6ms vm_diff=6.3ms vm_core=1.3ms vm_up=1.1ms vm_plate=2.3ms vm_refresh=2.0ms composite=3.9ms hands=19.2ms | cpu=218% (of one core)
+16:21:13 INFO    incanto: hands worker: 29.3 Hz, inference 19.2 ms, result age 54.5 ms (at main-loop use)
+16:21:13 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:21:13 INFO    incanto: vanish lighting [gain_map]: background live 152.3 | plate raw 144.4 (diff +7.9) -> matched 152.3 (diff +0.0) | per-cell residual mean|r| 0.96 signed -0.02 max|r| 10.3 (29 cells/frame) | gain BGR 1.09/1.08/1.10 (cells 1.00..1.29) offset +0.0/+0.0/+0.0 | background 53%
+16:21:13 INFO    incanto: vanish mask: plate-diff frames 16 | cell guard fired in 0 of 16 frames (0.0 cells when it fired) | body-sized difference accepted outside the zone in 0 frames | segmenter empty in 0 frames
+16:21:13 INFO    incanto: plate refresh: 4 passes, each blended 25% of the frame (alpha 0.020 per frame, outside the near-me zone + 40 px) | paused 0 (segmenter saw nobody) | plate health: raw diff +7.5 | gain BGR 1.05/1.05/1.05 | max cell gain 1.29 | background 59% | healthy
+16:21:18 INFO    incanto: FPS 25.0 (avg over 5.0s) | camera delivers 30.0 fps | grab=22.7ms retrieve=10.4ms wait_frame=2.8ms downscale=0.3ms hands_age=54.8ms segment=8.6ms vm_seg=1.2ms vm_hands=0.3ms vm_match=3.5ms vm_diff=5.2ms vm_core=1.2ms vm_up=1.2ms vm_plate=2.2ms vm_refresh=1.3ms composite=4.2ms vcam=4.2ms preview=7.3ms health=2.7ms hands=16.9ms | cpu=353% (of one core)
+16:21:18 INFO    incanto: hands worker: 25.0 Hz, inference 16.9 ms, result age 54.8 ms (at main-loop use)
+16:21:18 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:21:18 INFO    incanto: vanish lighting [gain_map]: background live 147.1 | plate raw 142.4 (diff +4.7) -> matched 147.4 (diff -0.3) | per-cell residual mean|r| 0.78 signed -0.21 max|r| 7.2 (31 cells/frame) | gain BGR 1.07/1.07/1.08 (cells 0.97..1.29) offset +0.0/+0.0/+0.0 | background 57%
+16:21:18 INFO    incanto: vanish mask: plate-diff frames 125 | cell guard fired in 0 of 125 frames (0.0 cells when it fired) | body-sized difference accepted outside the zone in 0 frames | segmenter empty in 0 frames
+16:21:18 INFO    incanto: plate refresh: 31 passes, each blended 35% of the frame (alpha 0.020 per frame, outside the near-me zone + 40 px) | paused 0 (segmenter saw nobody) | plate health: raw diff +4.7 | gain BGR 1.03/1.03/1.04 | max cell gain 1.39 | background 60% | healthy
+16:21:23 INFO    incanto: FPS 25.1 (avg over 5.0s) | camera delivers 30.1 fps | retrieve=10.6ms grab=22.7ms wait_frame=4.1ms downscale=0.3ms hands_age=53.0ms segment=8.3ms health=3.2ms vm_seg=1.1ms vm_hands=0.6ms vm_match=3.3ms vm_diff=5.0ms vm_core=1.2ms vm_up=1.1ms vm_plate=1.9ms vm_refresh=1.3ms composite=3.7ms vcam=4.1ms preview=6.8ms hands=19.3ms | cpu=324% (of one core)
+16:21:23 INFO    incanto: hands worker: 25.1 Hz, inference 19.3 ms, result age 53.0 ms (at main-loop use)
+16:21:23 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:21:23 INFO    incanto: vanish lighting [gain_map]: background live 144.7 | plate raw 142.5 (diff +2.3) -> matched 144.8 (diff -0.1) | per-cell residual mean|r| 1.00 signed -0.02 max|r| 19.3 (30 cells/frame) | gain BGR 1.03/1.04/1.04 (cells 0.98..1.22) offset +0.0/+0.0/+0.0 | background 56%
+16:21:23 INFO    incanto: vanish mask: plate-diff frames 126 | cell guard fired in 0 of 126 frames (0.0 cells when it fired) | body-sized difference accepted outside the zone in 0 frames | segmenter empty in 0 frames
+16:21:23 INFO    incanto: plate refresh: 32 passes, each blended 37% of the frame (alpha 0.020 per frame, outside the near-me zone + 40 px) | paused 0 (segmenter saw nobody) | plate health: raw diff +3.1 | gain BGR 1.02/1.02/1.02 | max cell gain 1.15 | background 58% | healthy
+16:21:24 WARNING incanto: Plate health: raw diff +9.4 | gain BGR 1.06/1.06/1.06 | max cell gain 1.59 | background 50% | FAILED: cell gain 1.59 above 1.5
+16:21:26 WARNING incanto: Vanish switched OFF: the plate no longer matches the room (raw diff +10.4 | gain BGR 1.07/1.07/1.07 | max cell gain 1.53 | background 41% | FAILED: cell gain 1.53 above 1.5). Press B to capture a new plate.
+16:21:28 INFO    incanto: FPS 27.2 (avg over 5.0s) | camera delivers 30.0 fps | grab=22.7ms retrieve=10.6ms wait_frame=10.1ms downscale=0.3ms hands_age=54.2ms segment=8.4ms vm_seg=1.2ms vm_hands=0.3ms vm_match=3.5ms vm_diff=5.6ms vm_core=1.3ms vm_up=1.2ms vm_plate=2.2ms vm_refresh=1.3ms composite=4.4ms vcam=4.3ms preview=5.9ms health=3.2ms hands=19.9ms | cpu=285% (of one core)
+16:21:28 INFO    incanto: hands worker: 27.0 Hz, inference 19.9 ms, result age 54.2 ms (at main-loop use)
+16:21:28 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:21:31 WARNING incanto: Vanish refused: the plate doesn't match the room (raw diff +23.5 | gain BGR 1.16/1.16/1.16 | max cell gain 1.93 | background 58% | FAILED: raw diff +23.5 beyond +/-20; cell gain 1.93 above 1.5). Press B to capture a new plate.
+16:21:33 WARNING incanto: Vanish refused: the plate doesn't match the room (raw diff +23.8 | gain BGR 1.17/1.16/1.16 | max cell gain 2.00 | background 62% | FAILED: raw diff +23.8 beyond +/-20; cell gain 2.00 above 1.5). Press B to capture a new plate.
+16:21:33 INFO    incanto: FPS 30.0 (avg over 5.0s) | camera delivers 29.8 fps | grab=22.3ms retrieve=11.0ms wait_frame=19.3ms downscale=0.2ms hands_age=51.3ms segment=7.9ms vcam=4.1ms preview=4.3ms health=2.9ms hands=16.8ms | cpu=202% (of one core)
+16:21:33 INFO    incanto: hands worker: 30.0 Hz, inference 16.8 ms, result age 51.3 ms (at main-loop use)
+16:21:33 INFO    incanto: camera: exposure=auto (our setting; driver readback is unreliable) | power=AC 100%
+16:21:33 WARNING incanto: Vanish refused: the plate doesn't match the room (raw diff +23.7 | gain BGR 1.17/1.16/1.16 | max cell gain 1.99 | background 61% | FAILED: raw diff +23.7 beyond +/-20; cell gain 1.99 above 1.5). Press B to capture a new plate.
+16:21:33 WARNING incanto: Vanish refused: the plate doesn't match the room (raw diff +23.4 | gain BGR 1.16/1.16/1.16 | max cell gain 1.71 | background 60% | FAILED: raw diff +23.4 beyond +/-20; cell gain 1.71 above 1.5). Press B to capture a new plate.
+16:21:34 WARNING incanto: Vanish refused: the plate doesn't match the room (raw diff +23.6 | gain BGR 1.16/1.16/1.15 | max cell gain 1.68 | background 58% | FAILED: raw diff +23.6 beyond +/-20; cell gain 1.68 above 1.5). Press B to capture a new plate.
+16:21:36 INFO    incanto: Quit requested.
+16:21:36 INFO    incanto: Summary: 3774 frames in 128.2s = 29.4 FPS average
+16:21:36 INFO    incanto: Shut down cleanly.
