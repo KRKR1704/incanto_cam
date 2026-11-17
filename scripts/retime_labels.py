@@ -43,7 +43,10 @@ NEW_TOLERANCE_S = 0.3
 MIN_POSE_S = 0.4
 HAND_LOST_S = 0.08                          # nearest tracked frame further than this from the sound = "hand lost at the snap"
 THUMB_TIPS, THUMB_PIPS = (8, 12, 16, 20), (6, 10, 14, 18)
-DROPPED = {21: "no thumbs-up pose in cue .. cue + 1.5 s; a pose only appears 2.5 s after the cue (121.9 s) and runs into cue 22: looks flubbed"}   # cue number -> reason
+DROPPED = {21: "no thumbs-up pose in cue .. cue + 1.5 s; a pose only appears 2.5 s after the cue (121.9 s) and runs into cue 22: looks flubbed",
+           22: "thumb held continuously, no onset; see holds", 23: "thumb held continuously, no onset; see holds"}   # cue number -> reason
+HOLDS = [{"gesture": "thumbs_up", "start": 121.9, "end": 125.6, "cues": [22], "max_fires": 1},
+         {"gesture": "thumbs_up", "start": 126.3, "end": 134.8, "cues": [23], "max_fires": 1}]   # a held pose fires at most once
 
 
 def beep_windows(cue: float) -> list[tuple[float, float]]:
@@ -253,6 +256,7 @@ def main() -> int:
             new["dropped"] = dropped
         if unresolved:
             new["unresolved"] = unresolved
+        new["holds"] = HOLDS
         labels["clips"][clip.path.name] = new
         Path(args.labels).write_text(LABELS_HEADER + yaml.safe_dump(labels, sort_keys=True, default_flow_style=None), encoding="utf-8")
     return 0
