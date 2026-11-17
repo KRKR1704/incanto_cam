@@ -23,6 +23,7 @@ CUES: dict[str, tuple[tuple[int, int], ...]] = {
     "capturing": ((1320, 450),),                      # long high tone: stay out, frames are being taken
     "ok": ((1047, 110), (1319, 110), (1568, 220)),    # rising three notes: plate captured
     "error": ((330, 220), (220, 450)),                # falling low pair: aborted / plate does not match
+    "go": ((1760, 220),),                             # guided recording: do the gesture NOW (ticks are "tick")
     "nudge": ((660, 120),),                           # one soft mid beep: lighting changed, consider a new plate
 }
 

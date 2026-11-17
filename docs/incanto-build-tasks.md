@@ -21,7 +21,7 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 1 | Camera pipeline | 7 | 1.5 h | ☑ |
 | 2 | Perception | 9 | 2.5 h | ☑ |
 | 3 | Clean plate | 9 | 1 h | ☑ |
-| 4 | Record & replay | 7 | 1.5 h | ☐ |
+| 4 | Record & replay | 7 | 1.5 h | ☑ |
 | 5 | Gesture engine | 11 | 4 h | ☐ |
 | 6 | Vanish spell | 11 | 4 h | ☐ |
 | 7 | More spells | 7 | 5 h | ☐ |
@@ -104,15 +104,22 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 
 | ID | Task | Depends on | Est. | Done |
 |---|---|---|---|---|
-| 4.1 | `io/audio.py`: mic stream thread (sounddevice, ~20 ms blocks) into a thread-safe ring buffer with timestamps | 1.5 | 20m | [ ] |
-| 4.2 | `io/recorder.py`: hotkey `R` starts/stops recording raw frames to `.mp4` + mic to `.wav` in `recordings/` (gitignored, local-only), with a shared start timestamp | 4.1 | 25m | [ ] |
-| 4.3 | Recorder runs on its own thread so recording never drops main-loop FPS | 4.2 | 10m | [ ] |
-| 4.4 | Replay source: `python -m incanto --replay <clip>` feeds video + audio through the pipeline in sync instead of webcam/mic | 4.2 | 25m | [ ] |
-| 4.5 | `--render-out <file>` option: save the composited output of a replay to `.mp4` for review | 4.4 | 10m | [ ] |
-| 4.6 | Record the labeled fixture set: 10 snaps, 10 claps, 10 thumbs-ups, 2 min of talking with hand movement. Clips of the user stay **local-only** (`recordings/` or `tests/fixtures/`, both gitignored); they are never committed | 4.2 | 15m | [ ] |
-| 4.7 | Label file `tests/fixtures/labels.yaml`: clip → list of (gesture, timestamp). This is the **only** file under `tests/fixtures/` that is committed | 4.6 | 15m | [ ] |
+| 4.1 | `io/audio.py`: mic stream thread (sounddevice, ~20 ms blocks) into a thread-safe ring buffer with timestamps (on the camera's perf_counter clock). Never defaults to a virtual device; `--list-audio-devices`; runs without audio if there is no mic | 1.5 | 20m | [x] |
+| 4.2 | `io/recorder.py`: hotkey `R` starts/stops recording raw frames to `.avi` (HFYU lossless by default, MJPG optional: this OpenCV build has no usable H.264 and cannot raise MJPG quality) + mic to `.wav` in `recordings/` (gitignored, local-only), with a per-frame timestamp sidecar and the audio start time on the same clock | 4.1 | 25m | [x] |
+| 4.3 | Recorder runs on its own thread so recording never drops main-loop FPS (bounded queue; drops are counted, not waited for) | 4.2 | 10m | [x] |
+| 4.4 | Replay source: `python -m incanto --replay <clip>` feeds video + audio through the pipeline in sync (recorded times; `--realtime` or `--fast`; hands synchronous and deterministic) instead of webcam/mic | 4.2 | 25m | [x] |
+| 4.5 | `--render-out <file>` option: save the composited output of a replay to `.mp4`/`.avi` for review (local-only) | 4.4 | 10m | [x] |
+| 4.6 | Record the labeled fixture set: 10 snaps, 10 claps, 10 thumbs-ups, 2 min of talking with hand movement. Clips of the user stay **local-only** (`recordings/` or `tests/fixtures/`, both gitignored); they are never committed. Tooling done: `--record-guided plans/fixture-plan.yaml` (beeps and prompts, cue times recorded); clip `guided-20261116-175501` recorded (298 s, 8922 frames, 0 dropped; local-only) | 4.2 | 15m | [x] |
+| 4.7 | Label file `tests/fixtures/labels.yaml`: clip → list of (gesture, timestamp). This is the **only** file under `tests/fixtures/` that is committed. Written automatically by `--record-guided` (gesture, cue time, tolerance +-0.6 s, talk segments); written for that clip (30 cues, 1 talk segment). **Open:** `scripts/check_cues.py` finds 17 of 30 cues late against the cue +-0.6 s window (the gestures happened 0.5-1.3 s after the beep): the windows or times need a decision before Phase 5 uses them | 4.6 | 15m | [x] |
 
 **Phase gate:** Replaying a recorded clip produces the same perception output (mask + hands) as live, and the audio stays in sync. Clips are local-only; commit only the comparison log/report.
+
+**Gate passed (guided clip `guided-20261116-175501`, 298 s, 8922 frames; logs in `docs/evidence/phase-4/`):**
+- Determinism (`determinism.txt`): two independent hand trackers and segmenters over every frame with the replay's timestamps: identical hand landmarks on all 6989 frames that have hands, identical masks (max difference 0). The clip is lossless (bit-exact frames), so replay perception sees the pixels live saw; live itself used the async hand worker, so it is not frame-for-frame comparable by design.
+- Full `--fast` replay (`replay-fast.txt`): all 8922 frames in 268 s (33.3 FPS), exit 0, no warnings.
+- A/V sync (`av-sync.txt`): 10 claps, audio minus video median -24.8 ms (std 13.8 ms); the intersection of all intervals is -36..-4 ms: within +-1 frame, no `audio.offset_ms` needed. Timed from motion, because hand tracking loses both hands for ~150-350 ms around every clap.
+- Audio is 0.684 s longer than the video span: the audio starts 0.119 s after the first frame and (before a fix in this phase) ran 0.803 s past the last frame; replay uses the absolute times, so neither matters (`audio-video-length.txt`).
+- Findings for Phase 5: this camera repeats every other frame (50% of frames identical: the picture updates at ~15 fps in this lighting), and the user reacts 0.5-1.3 s after a cue beep (`cue-check.txt`).
 
 ---
 
@@ -131,6 +138,10 @@ Task-by-task checklist for building Incanto. It follows the phases in `docs/inca
 | 5.9 | `tests/test_gestures_replay.py`: run detectors on the local clips, compare to `labels.yaml`, print precision/recall per gesture. Must `pytest.skip` with a clear message when the local clips are missing, so a fresh clone still passes | 4.7, 5.6 | 30m | [ ] |
 | 5.10 | Tune thresholds in `config.yaml` until the replay targets pass | 5.9 | 30m | [ ] |
 | 5.11 | Unit tests for trigger cooldown + debounce logic | 5.7 | 15m | [ ] |
+
+**Note (from the Phase 4 fixture data): snap and clap audio thresholds must be calibrated from the fixture clip, relative to the noise floor.** Snaps measured as quiet as -45 to -49 dBFS on the headset mic, so the config default of -18 dB is far too high. Scoring rules for 5.9: a detection within tolerance of `event_time` or any `alt_event_times` is a hit (a second detection matching an alt time is not a false positive), and a held thumbs-up must fire at most once per entry in `holds`.
+
+**Note (from the Phase 4 measurements): detection timing should come from audio where possible.** Video gives presence and pose (hands visible, a raised hand, a thumbs-up shape) and may update at only ~15 fps: auto exposure lengthens in a dim room and the driver then repeats every other frame (the guided clip: exactly 15.0 unique fps in every segment, while 30 frames a second arrive). A video timestamp is therefore good to ~66 ms per event, and hand tracking loses both hands for 150-350 ms around a clap. So: snap and clap timing = the audio onset (the A/V check puts audio ~25 ms earlier than the picture, within +-1 frame); the video side only confirms (raised hand near the face, wrists close). Evaluate against `event_time` in `labels.yaml` (when the gesture happened), not `cue_time` (when the guide beeped; people react 0.5-1.3 s late), with the `tolerance_s` given there. A manual exposure of -6 or shorter restores 30 real fps (the live FPS line shows `unique N`, and the preview warns when it stays under 20 for 10 s).
 
 **Phase gate:**
 - Replay report: ≥ 9/10 detected per gesture, **0** false triggers on the talking clip. Save the report output (`.txt`, committed).

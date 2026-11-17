@@ -112,6 +112,23 @@ plate:                         # clean plate of the empty room (plates/ is local
                                # otherwise stay on auto
   lock_exposure_settle_s: 0.7  # wait after each exposure change before measuring
 
+audio:                         # microphone stream (also what R records and what replay feeds back)
+  enabled: true
+  device: auto                 # auto | a name (substring, e.g. "HyperX") | an index (see --list-audio-devices).
+                               # auto never picks a virtual device (Voicemod, VB-Audio, Steam, ...): if the default
+                               # input is one, the first real microphone is used instead and the log says which
+  block_ms: 20                 # mic callback block size
+  ring_seconds: 10.0           # audio kept in the ring buffer
+  offset_ms: 0.0               # added to every audio timestamp, live and replay (scripts/check_av_sync.py suggests it)
+
+recording:                     # R in the preview, --record-guided; everything here is local-only (gitignored)
+  dir: recordings
+  codec: lossless              # lossless = HFYU .avi: bit-exact frames, so replay sees exactly what live saw, but about
+                               #   1.7 GB per minute; mjpg = .avi, about 25x smaller, slightly lossy (this OpenCV build
+                               #   cannot raise MJPG quality above its default)
+  queue_frames: 45             # frames the writer thread may fall behind before frames are dropped (and counted)
+  min_free_gb: 2.0             # refuse to start recording with less free disk than this
+
 vcam:
   backend: obs                 # obs | unitycapture
 

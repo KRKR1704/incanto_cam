@@ -1,0 +1,6 @@
+Determinism check: recordings\guided-20261116-175501
+8922 frames replayed twice with independent hand trackers and segmenters, in 556 s (timestamps from the recorded frame times; hands synchronous)
+camera: 4460 of 8922 frames (50%) show the same picture as the frame before (the driver repeating a frame: the picture updates at about 15 fps)
+hands: present on 6989 frames | frames where count/handedness differ between runs: 0 | max landmark difference 0 (normalised units; 1.0 = frame width) | frames with any landmark difference: 0
+mask: max per-pixel difference 0 (0..1) | frames with any difference: 0 | pixels differing by more than 0.001: 0 of 2055628800
+RESULT: IDENTICAL hands and masks on every frame.

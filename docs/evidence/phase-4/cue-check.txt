@@ -1,0 +1,40 @@
+Cue sanity check: guided-20261116-175501 (30 cues). labels.yaml is NOT modified.
+delay = seconds after the cue beep. Label window: cue +- tolerance. 'spikes' = sharp sounds within cue-tolerance .. cue+2 s.
+
+ # gesture        cue  first sound sounds  hand frames  pose / hands  verdict
+   (hand frames = frames with a hand tracked / with two hands, in the 3 s scanned around the cue; pose = when the thumbs-up pose starts, relative to the cue)
+ 1 snap          8.07      +0.47 s      3     91f/86f2   2 hands yes  OK  <- 3 sounds in the window: repeated snaps or speech
+ 2 snap         12.69      +0.60 s      1     82f/66f2   2 hands yes  OK
+ 3 snap         17.01      +0.38 s      2      90f/0f2    2 hands no  OK
+ 4 snap         22.29      +0.45 s      2      86f/0f2    2 hands no  OK
+ 5 snap         26.43      +0.73 s      3      90f/0f2    2 hands no  LATE  <- sound +0.73 s after the cue, beyond the +0.6 s window; 3 sounds in the window: repeated snaps or speech
+ 6 snap         31.50      +0.60 s      3      83f/0f2    2 hands no  LATE  <- sound +0.60 s after the cue, beyond the +0.6 s window; 3 sounds in the window: repeated snaps or speech
+ 7 snap         36.26      +0.62 s      3      91f/0f2    2 hands no  LATE  <- sound +0.62 s after the cue, beyond the +0.6 s window; 3 sounds in the window: repeated snaps or speech
+ 8 snap         40.38      +0.47 s      3     92f/10f2   2 hands yes  OK  <- 3 sounds in the window: repeated snaps or speech
+ 9 snap         45.39      +0.73 s      2      91f/0f2    2 hands no  LATE  <- sound +0.73 s after the cue, beyond the +0.6 s window
+10 snap         49.47      +0.58 s      1      57f/0f2    2 hands no  OK
+11 clap         62.65      +0.67 s      1     82f/78f2   2 hands yes  LATE  <- sound +0.67 s after the cue, beyond the +0.6 s window
+12 clap         67.52      +0.80 s      1     81f/63f2   2 hands yes  LATE  <- sound +0.80 s after the cue, beyond the +0.6 s window
+13 clap         71.65      +0.76 s      1     64f/48f2   2 hands yes  LATE  <- sound +0.76 s after the cue, beyond the +0.6 s window
+14 clap         75.86      +0.53 s      1     89f/36f2   2 hands yes  OK
+15 clap         80.69      +0.65 s      1      86f/2f2   2 hands yes  LATE  <- sound +0.65 s after the cue, beyond the +0.6 s window
+16 clap         86.34      +1.34 s      1     55f/33f2   2 hands yes  LATE  <- sound +1.34 s after the cue, beyond the +0.6 s window
+17 clap         90.63      +1.10 s      1     76f/12f2   2 hands yes  LATE  <- sound +1.10 s after the cue, beyond the +0.6 s window
+18 clap         95.03      +0.82 s      1      71f/7f2   2 hands yes  LATE  <- sound +0.82 s after the cue, beyond the +0.6 s window
+19 clap        100.31      +0.52 s      1     73f/34f2   2 hands yes  OK
+20 clap        106.19      +0.53 s      1     84f/34f2   2 hands yes  OK
+21 thumbs_up   119.41            -      -      70f/0f2       no pose  CHECK  <- no thumbs-up pose seen (rough landmark test)
+22 thumbs_up   124.55            -      -     86f/56f2  pose <-0.8 s  OK  <- pose already up when the scan began (anticipated, or the rough test also fires on a resting hand)
+23 thumbs_up   129.36            -      -     89f/88f2  pose <-0.8 s  OK  <- pose already up when the scan began (anticipated, or the rough test also fires on a resting hand)
+24 thumbs_up   135.30            -      -     55f/49f2  pose <-0.8 s  OK  <- pose already up when the scan began (anticipated, or the rough test also fires on a resting hand)
+25 thumbs_up   139.38            -      -     43f/43f2  pose +0.80 s  LATE  <- pose starts +0.80 s after the cue, beyond the +0.6 s window
+26 thumbs_up   145.12            -      -     46f/44f2  pose +0.74 s  LATE  <- pose starts +0.74 s after the cue, beyond the +0.6 s window
+27 thumbs_up   149.68            -      -     42f/36f2  pose +0.85 s  LATE  <- pose starts +0.85 s after the cue, beyond the +0.6 s window
+28 thumbs_up   154.00            -      -     32f/32f2  pose +0.74 s  LATE  <- pose starts +0.74 s after the cue, beyond the +0.6 s window
+29 thumbs_up   158.21            -      -      46f/0f2  pose +0.67 s  LATE  <- pose starts +0.67 s after the cue, beyond the +0.6 s window
+30 thumbs_up   162.82            -      -     34f/34f2  pose +0.80 s  LATE  <- pose starts +0.80 s after the cue, beyond the +0.6 s window
+
+talk segment 176-296 s (nothing should fire): hands visible in 78% of frames; 143 sharp sound spikes (speech and desk noise included); thumbs-up-like pose in 309 frames (16 separate episodes, first at 184.0 s)
+
+SUMMARY: 12 OK, 17 late (gesture happened, after the label window), 1 to check (nothing gesture-like found)
+cues to review: #5 snap @26.43s (LATE), #6 snap @31.50s (LATE), #7 snap @36.26s (LATE), #9 snap @45.39s (LATE), #11 clap @62.65s (LATE), #12 clap @67.52s (LATE), #13 clap @71.65s (LATE), #15 clap @80.69s (LATE), #16 clap @86.34s (LATE), #17 clap @90.63s (LATE), #18 clap @95.03s (LATE), #21 thumbs_up @119.41s (CHECK), #25 thumbs_up @139.38s (LATE), #26 thumbs_up @145.12s (LATE), #27 thumbs_up @149.68s (LATE), #28 thumbs_up @154.00s (LATE), #29 thumbs_up @158.21s (LATE), #30 thumbs_up @162.82s (LATE)

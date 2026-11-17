@@ -47,14 +47,15 @@ class Segmenter:
         t = np.clip((mask - self.feather_low) / (self.feather_high - self.feather_low), 0.0, 1.0)
         return t * t * (3.0 - 2.0 * t)
 
-    def segment(self, small_bgr: np.ndarray) -> np.ndarray:
+    def segment(self, small_bgr: np.ndarray, timestamp_ms: int | None = None) -> np.ndarray:
         run = self._frame_no % self.every_n == 0
         self._frame_no += 1
         if not run:
             return self._last_full  # reuse the last mask on skipped frames
         rgb = cv2.cvtColor(small_bgr, cv2.COLOR_BGR2RGB)
         result = self._segmenter.segment_for_video(
-            mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), self._clock.now())
+            mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb),
+            self._clock.now() if timestamp_ms is None else timestamp_ms)
         raw = np.array(result.confidence_masks[0].numpy_view(), dtype=np.float32).reshape(rgb.shape[:2])
         mask = self._smooth_edges(raw)
         if self._prev_small is not None and self._prev_small.shape == mask.shape:

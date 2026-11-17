@@ -1,0 +1,8 @@
+Where the 0.7 s comes from (recorded times, all on the perf_counter clock):
+  video: 8922 frames, first 364496.917, last 364794.933  -> span 298.016 s (30 fps nominal would say 297.400 s)
+  audio: 13172670 samples at 44100 Hz = 298.700 s, first sample at 364497.036
+  audio starts 118.7 ms AFTER the first frame, and ends 0.803 s AFTER the last frame
+  => 0.684 s longer = 0.803 s trailing audio - 0.119 s late start
+Replay feeds audio only up to the last frame's time: 13137263 samples (297.897 s) of 13172670; 35407 samples (0.803 s) of tail are never used
+ring time of sample k minus (audio start + k/rate): ['0.000000000']
+with a ring large enough to keep everything, max |stamp error| over 6 sample positions: 5.82e-11 s

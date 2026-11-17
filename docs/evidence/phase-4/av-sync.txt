@@ -1,0 +1,32 @@
+A/V sync check: guided-20261116-175501
+clip: 8922 frames over 298.0s; audio 44100 Hz from Headset Microphone (HyperX Virt, starting 119 ms after the first frame; audio.offset_ms in config: 0 (this check uses the raw recorded times)
+labelled clap cues: 10; a sound spike was found for 10 of them (searched from cue - tolerance to cue + 2 s)
+
+ #  cue (s) sound (s)  last fast first stop   offset (audio - video), ms  note
+ 1    62.65    63.316     63.299     63.368        -51 ..  +17  (mid -17)
+ 2    67.52    68.322     68.305     68.388        -66 ..  +17  (mid -25)
+ 3    71.65    72.407     72.386     72.450        -43 ..  +22  (mid -11)
+ 4    75.86    76.393     76.385     76.467        -74 ..   +7  (mid -34)
+ 5    80.69    81.346     81.330     81.412        -66 ..  +16  (mid -25)
+ 6    86.34    87.683     87.682     87.745        -61 ..   +1  (mid -30)
+ 7    90.63    91.729     91.682     91.765        -36 ..  +47  (mid +5)
+ 8    95.03    95.850     95.825     95.890        -40 ..  +26  (mid -7)
+ 9   100.31   100.831    100.836    100.914        -82 ..   -4  (mid -43)
+10   106.19   106.718    106.719    106.783        -65 ..   -1  (mid -33)
+
+offset = audio time - video time of the same clap; each clap gives an interval because the picture updates every ~66 ms (the contact lies between the last fast frame and the first stopped one)
+RESULT: 10 claps | median of midpoints -24.8 ms | mean -21.9 ms | spread: std 13.8 ms, MAD 8.7 ms | the median lies inside 10 of 10 intervals
+intersection of all intervals: -36 .. -4 ms (one constant offset explains every clap)
+PASS: median offset within +-1 frame (33 ms): no audio.offset_ms correction needed.  (the interval's edge reaches slightly beyond 33 ms, i.e. within the camera's own 66 ms picture step)
+
+hand tracking around each clap (why wrist landmarks cannot time a clap):
+  clap 1: two hands tracked until -132 ms, lost for 12 of 24 frames within +-400 ms
+  clap 2: two hands tracked until -131 ms, lost for 18 of 24 frames within +-400 ms
+  clap 3: two hands tracked until -139 ms, lost for 16 of 24 frames within +-400 ms
+  clap 4: two hands tracked until -126 ms, lost for 14 of 23 frames within +-400 ms
+  clap 5: two hands tracked until -134 ms, lost for 22 of 24 frames within +-400 ms
+  clap 6: two hands tracked until -131 ms, lost for 13 of 24 frames within +-400 ms
+  clap 7: two hands tracked until -159 ms, lost for 17 of 25 frames within +-400 ms
+  clap 8: two hands tracked until -139 ms, lost for 17 of 24 frames within +-400 ms
+  clap 9: two hands tracked until -113 ms, lost for 14 of 24 frames within +-400 ms
+  clap 10: two hands tracked until -131 ms, lost for 14 of 24 frames within +-400 ms
